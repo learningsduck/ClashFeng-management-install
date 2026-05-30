@@ -3,6 +3,8 @@ set -euo pipefail
 
 # shellcheck source=lib/common.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/common.sh"
+# shellcheck source=lib/mysql-bootstrap.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/mysql-bootstrap.sh"
 
 SYSTEMD_UNIT="/etc/systemd/system/clashfeng-auth.service"
 
@@ -104,7 +106,14 @@ run_db_init() {
   sed -i "s/^MYSQL_HOST=.*/MYSQL_HOST=${init_host}/" "${APP_DIR}/.env"
 
   log "执行 init-mysql.mjs ..."
-  (cd "${APP_DIR}" && node scripts/init-mysql.mjs)
+  if ! (cd "${APP_DIR}" && node scripts/init-mysql.mjs); then
+    warn "业务用户建表失败，尝试使用 root 账户初始化..."
+    (
+      cd "${APP_DIR}"
+      MYSQL_USER=root MYSQL_PASSWORD="${MYSQL_ROOT_PASSWORD}" node scripts/init-mysql.mjs
+    )
+    bootstrap_mysql_users
+  fi
   log "数据库表结构初始化完成"
 }
 
@@ -119,6 +128,7 @@ docker_compose_mysql_up() {
   cd "${COMPOSE_DIR}"
   docker compose up -d mysql
   wait_mysql_healthy
+  bootstrap_mysql_users
 }
 
 install_systemd_service() {

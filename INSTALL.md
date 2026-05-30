@@ -90,6 +90,23 @@ certbot certificates
 
 MySQL 连不上：检查主库安全组、firewalld、`MYSQL_HOST` 是否为内网地址。
 
+### `Access denied for user 'clashwin'@'172.18.0.1'`
+
+宿主机连 Docker MySQL 时客户端 IP 常为网桥地址。常见原因：**重装后 .env 密码与旧数据卷不一致**。
+
+```bash
+# 方案 A：清空数据卷后重装（测试环境）
+sudo ./install.sh --uninstall --purge-data -y
+git pull && sudo ./install.sh
+
+# 方案 B：用当前 install-info 里的密码同步（在 compose 目录）
+cd /opt/clashfeng/compose
+source /opt/clashfeng/install-info.env
+docker compose exec -T mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -e \
+  "ALTER USER 'clashwin'@'%' IDENTIFIED BY '$MYSQL_PASSWORD'; FLUSH PRIVILEGES;"
+cd /opt/clashfeng/app && node scripts/init-mysql.mjs
+```
+
 HTTPS 失败：确认 DNS 已生效，`curl -I http://域名/` 可从公网访问。
 
 ### 安装停在 `[db:init] MySQL 表结构初始化完成` 很久
