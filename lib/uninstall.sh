@@ -3,6 +3,8 @@ set -euo pipefail
 
 # shellcheck source=lib/common.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/common.sh"
+# shellcheck source=lib/app.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/app.sh"
 
 NGINX_SITE="/etc/nginx/conf.d/clashfeng.conf"
 
@@ -25,6 +27,10 @@ run_uninstall() {
     warn "将停止 Docker 容器并移除 Nginx 站点配置"
     prompt_yn "确认继续卸载?" "n" || { log "已取消"; return 0; }
   fi
+
+  # --- systemd API ---
+  log "停止宿主机 API 服务..."
+  stop_host_app_service
 
   # --- Docker ---
   if [[ -d "${COMPOSE_DIR}" && -f "${COMPOSE_DIR}/docker-compose.yml" ]]; then

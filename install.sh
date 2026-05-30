@@ -22,8 +22,8 @@ source "${SCRIPT_DIR}/lib/uninstall.sh"
 banner() {
   echo -e "${CYAN}"
   echo "╔══════════════════════════════════════════════════════╗"
-  echo "║     ClashFeng 管理后台 + API 一键安装  v1.1.0        ║"
-  echo "║     CentOS 7/8/9 · 宿主机 Nginx · Docker MySQL      ║"
+  echo "║     ClashFeng 管理后台 + API 一键安装  v1.2.0        ║"
+  echo "║     API: 宿主机 Node · MySQL: Docker · Nginx 宿主机  ║"
   echo "╚══════════════════════════════════════════════════════╝"
   echo -e "${NC}"
 }
@@ -128,7 +128,7 @@ show_done() {
 run_all_in_one() {
   prompt_domain_cert
   prompt_security
-  MYSQL_HOST=mysql
+  MYSQL_HOST=127.0.0.1
   MYSQL_PORT=3306
   MYSQL_DATABASE="${MYSQL_DATABASE}"
   MYSQL_USER="${MYSQL_USER}"
@@ -144,11 +144,9 @@ run_all_in_one() {
   write_app_env
   write_compose_file
 
-  cd "${COMPOSE_DIR}"
-  docker compose up -d mysql
-  wait_mysql_healthy
+  docker_compose_mysql_up
   run_db_init
-  docker_compose_up
+  start_host_app_service
 
   install_nginx_certbot
   install_nginx_site
@@ -182,7 +180,6 @@ run_api_standby() {
   open_firewall_http
   clone_auth_repo
   write_app_env
-  write_compose_file
 
   log "测试连接主库 ${MYSQL_HOST}:${MYSQL_PORT} ..."
   if ! docker run --rm mysql:8.0 mysql -h "${MYSQL_HOST}" -P "${MYSQL_PORT}" -u "${MYSQL_USER}" -p"${MYSQL_PASSWORD}" -e "SELECT 1" &>/dev/null; then
@@ -190,7 +187,8 @@ run_api_standby() {
   fi
   log "主库连接成功"
 
-  docker_compose_up
+  build_app
+  start_host_app_service
 
   install_nginx_certbot
   install_nginx_site

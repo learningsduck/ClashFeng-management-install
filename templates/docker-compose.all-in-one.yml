@@ -1,3 +1,4 @@
+# 仅 MySQL；API 由宿主机 systemd 运行（避免 Docker 构建卡住）
 services:
   mysql:
     image: mysql:8.0
@@ -19,24 +20,5 @@ services:
       timeout: 5s
       retries: 15
 
-  app:
-    build:
-      context: ${APP_DIR}
-      dockerfile: Dockerfile
-    container_name: clashfeng-app
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:3001:3001"
-    env_file:
-      - .env
-    environment:
-      MYSQL_HOST: mysql
-    depends_on:
-      mysql:
-        condition: service_healthy
-    volumes:
-      - app_data:/app/data
-
 volumes:
   mysql_data:
-  app_data:

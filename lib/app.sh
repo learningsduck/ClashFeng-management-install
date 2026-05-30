@@ -4,6 +4,8 @@ set -euo pipefail
 # shellcheck source=lib/common.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/common.sh"
 
+SYSTEMD_UNIT="/etc/systemd/system/clashfeng-auth.service"
+
 clone_auth_repo() {
   mkdir_p "${APP_DIR}"
   if [[ -d "${APP_DIR}/.git" ]]; then
@@ -24,6 +26,11 @@ write_app_env() {
     admin_ip_line="ADMIN_IP_WHITELIST=${ADMIN_IP_WHITELIST}"
   fi
 
+  local db_host="${MYSQL_HOST}"
+  if [[ "${INSTALL_ROLE}" == "all-in-one" ]]; then
+    db_host="127.0.0.1"
+  fi
+
   cat > "${COMPOSE_DIR}/.env" <<EOF
 APP_DIR=${APP_DIR}
 PORT=${APP_PORT}
@@ -35,19 +42,22 @@ JWT_ACCESS_EXPIRES_IN=${JWT_ACCESS_EXPIRES_IN}
 JWT_REFRESH_EXPIRES_IN=${JWT_REFRESH_EXPIRES_IN}
 ADMIN_INIT_SECRET=${ADMIN_INIT_SECRET}
 
-MYSQL_HOST=${MYSQL_HOST}
+MYSQL_HOST=${db_host}
 MYSQL_PORT=${MYSQL_PORT}
 MYSQL_USER=${MYSQL_USER}
 MYSQL_PASSWORD=${MYSQL_PASSWORD}
 MYSQL_DATABASE=${MYSQL_DATABASE}
 MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-}
 
-DATA_DIR=/app/data
+DATA_DIR=${APP_DIR}/data
 SMS_PROVIDER=${SMS_PROVIDER}
 EMAIL_PROVIDER=${EMAIL_PROVIDER}
 ${admin_ip_line}
 EOF
   chmod 600 "${COMPOSE_DIR}/.env"
+  cp "${COMPOSE_DIR}/.env" "${APP_DIR}/.env"
+  chmod 600 "${APP_DIR}/.env"
+  mkdir_p "${APP_DIR}/data"
 }
 
 write_compose_file() {
@@ -56,63 +66,111 @@ write_compose_file() {
   cp "${tpl}" "${COMPOSE_DIR}/docker-compose.yml"
 }
 
-run_db_init() {
-  log "初始化数据库表结构..."
-  local init_host="${MYSQL_HOST}"
-  if [[ "${INSTALL_ROLE}" == "all-in-one" ]]; then
-    init_host="127.0.0.1"
+ensure_node() {
+  if command -v node &>/dev/null; then
+    return 0
   fi
-
-  if ! command -v node &>/dev/null; then
-    log "安装 Node.js 22 用于 db:init（仅初始化阶段）..."
-    if [[ "${OS_MAJOR:-8}" == "7" ]]; then
-      curl -fsSL https://rpm.nodesource.com/setup_18.x | bash -
-      yum install -y nodejs
-    else
-      curl -fsSL https://rpm.nodesource.com/setup_22.x | bash -
-      dnf install -y nodejs
-    fi
+  log "安装 Node.js（宿主机运行 API）..."
+  if [[ "${OS_MAJOR:-8}" == "7" ]]; then
+    curl -fsSL https://rpm.nodesource.com/setup_18.x | bash -
+    yum install -y nodejs
+  else
+    curl -fsSL https://rpm.nodesource.com/setup_22.x | bash -
+    dnf install -y nodejs
   fi
+}
 
-  cp "${COMPOSE_DIR}/.env" "${APP_DIR}/.env"
-  sed -i "s/^MYSQL_HOST=.*/MYSQL_HOST=${init_host}/" "${APP_DIR}/.env"
-
+build_app() {
+  ensure_node
+  log "编译 ClashFeng-auth（npm ci + build）..."
   (
     cd "${APP_DIR}"
     npm ci
     npm run build
-    node scripts/init-mysql.mjs
   )
-  log "数据库表结构初始化完成（宿主机 Node 阶段结束）"
+  log "编译完成"
 }
 
-docker_compose_up() {
+run_db_init() {
+  log "初始化 MySQL 表结构..."
+  ensure_node
+  build_app
+
+  local init_host="127.0.0.1"
+  if [[ "${INSTALL_ROLE}" == "api-standby" ]]; then
+    init_host="${MYSQL_HOST}"
+  fi
+
+  sed -i "s/^MYSQL_HOST=.*/MYSQL_HOST=${init_host}/" "${APP_DIR}/.env"
+
+  log "执行 init-mysql.mjs ..."
+  (cd "${APP_DIR}" && node scripts/init-mysql.mjs)
+  log "数据库表结构初始化完成"
+}
+
+docker_compose_mysql_up() {
+  if [[ ! -f "${COMPOSE_DIR}/docker-compose.yml" ]]; then
+    return 0
+  fi
+  if ! grep -q "mysql:" "${COMPOSE_DIR}/docker-compose.yml" 2>/dev/null; then
+    return 0
+  fi
+  log "启动 Docker MySQL..."
   cd "${COMPOSE_DIR}"
+  docker compose up -d mysql
+  wait_mysql_healthy
+}
+
+install_systemd_service() {
+  log "配置 systemd 服务 clashfeng-auth ..."
+  render_template "${SCRIPT_DIR}/templates/clashfeng-auth.service.tpl" "${SYSTEMD_UNIT}"
+  systemctl daemon-reload
+  systemctl enable clashfeng-auth
+  systemctl restart clashfeng-auth
+}
+
+start_host_app_service() {
   echo ""
   log "=========================================="
-  log "下一步: 构建 Docker 应用镜像（不是卡死）"
-  log "首次需拉取 node:22 镜像并在容器内 npm install"
-  log "国外 VPS 约 5–15 分钟，慢网可能 20–40 分钟"
-  log "另开 SSH 可看进度: cd ${COMPOSE_DIR} && docker compose build --progress=plain app"
+  log "启动 API（宿主机 Node + systemd）"
+  log "已跳过 Docker 构建应用镜像，避免长时间无输出"
   log "=========================================="
   echo ""
 
-  export DOCKER_BUILDKIT=1
-  docker compose build --progress=plain app
+  [[ -f "${APP_DIR}/dist/index.js" ]] || die "缺少 ${APP_DIR}/dist/index.js，请先 build"
 
-  log "镜像构建完成，正在启动容器..."
-  docker compose up -d
+  install_systemd_service
 
-  log "等待应用就绪（/auth/captcha）..."
+  log "等待应用就绪..."
   local i
-  for i in $(seq 1 30); do
+  for i in $(seq 1 40); do
     if curl -sf "http://127.0.0.1:${APP_PORT}/auth/captcha" >/dev/null 2>&1; then
-      log "应用已响应"
+      log "应用已响应 http://127.0.0.1:${APP_PORT}"
+      systemctl --no-pager status clashfeng-auth | head -5 || true
       return 0
+    fi
+    if ! systemctl is-active clashfeng-auth &>/dev/null; then
+      warn "服务未运行，最近日志:"
+      journalctl -u clashfeng-auth -n 20 --no-pager || true
     fi
     sleep 2
   done
-  warn "应用启动超时，请检查: docker compose -f ${COMPOSE_DIR}/docker-compose.yml logs"
+  die "应用启动超时。执行: journalctl -u clashfeng-auth -f"
+}
+
+# 保留：仅当 USE_DOCKER_APP=1 时使用（默认不再调用）
+docker_compose_up() {
+  cd "${COMPOSE_DIR}"
+  export DOCKER_BUILDKIT=1
+  log "Docker 模式构建应用（较慢）..."
+  docker compose build --progress=plain app
+  docker compose up -d
+  local i
+  for i in $(seq 1 30); do
+    curl -sf "http://127.0.0.1:${APP_PORT}/auth/captcha" >/dev/null 2>&1 && return 0
+    sleep 2
+  done
+  warn "应用启动超时"
 }
 
 wait_mysql_healthy() {
@@ -130,5 +188,12 @@ wait_mysql_healthy() {
     fi
     sleep 2
   done
-  die "MySQL 启动超时，请检查 docker compose logs mysql"
+  die "MySQL 启动超时，请检查: docker compose -f ${COMPOSE_DIR}/docker-compose.yml logs mysql"
+}
+
+stop_host_app_service() {
+  systemctl stop clashfeng-auth 2>/dev/null || true
+  systemctl disable clashfeng-auth 2>/dev/null || true
+  rm -f "${SYSTEMD_UNIT}"
+  systemctl daemon-reload 2>/dev/null || true
 }

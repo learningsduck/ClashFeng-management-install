@@ -3,7 +3,7 @@
 ClashFeng 认证后端 + 管理后台在 **CentOS 7/8/9** 上的一键安装脚本。
 
 - 宿主机 **Nginx + Certbot**（HTTPS 自动申请与续签）
-- **Docker**：MySQL + [ClashFeng-auth](https://github.com/learningsduck/ClashFeng-auth)
+- **Docker**：仅 MySQL；**API** 用宿主机 Node + systemd（避免 Docker 构建卡住）
 - 支持：主站一体、API 备用节点、仅数据库主库
 
 ## 快速开始
