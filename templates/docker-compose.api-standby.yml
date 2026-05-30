@@ -1,0 +1,16 @@
+services:
+  app:
+    build:
+      context: ${APP_DIR}
+      dockerfile: Dockerfile
+    container_name: clashfeng-app
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3001:3001"
+    env_file:
+      - .env
+    volumes:
+      - app_data:/app/data
+
+volumes:
+  app_data:

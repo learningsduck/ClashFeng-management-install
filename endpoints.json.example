@@ -1,0 +1,7 @@
+{
+  "primary": "https://auth1.example.com",
+  "backups": [
+    "https://auth2.example.net"
+  ],
+  "updated_at": "2026-01-01T00:00:00Z"
+}
