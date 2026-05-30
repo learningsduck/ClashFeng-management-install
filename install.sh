@@ -142,7 +142,6 @@ run_all_in_one() {
   docker compose up -d mysql
   wait_mysql_healthy
   run_db_init
-  docker compose up -d
   docker_compose_up
 
   install_nginx_certbot

@@ -68,3 +68,16 @@ certbot certificates
 MySQL 连不上：检查主库安全组、firewalld、`MYSQL_HOST` 是否为内网地址。
 
 HTTPS 失败：确认 DNS 已生效，`curl -I http://域名/` 可从公网访问。
+
+### 安装停在 `[db:init] MySQL 表结构初始化完成` 很久
+
+数据库已建好，脚本正在 **构建 Docker 应用镜像**（默认几乎无输出）。请耐心等待，或另开 SSH 执行：
+
+```bash
+cd /opt/clashfeng/compose
+docker compose build --progress=plain app
+docker compose up -d
+docker compose logs -f app
+```
+
+若拉取 `node:22` 极慢，可配置 Docker 镜像加速后重试构建。

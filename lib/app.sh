@@ -83,15 +83,27 @@ run_db_init() {
     npm run build
     node scripts/init-mysql.mjs
   )
-  log "数据库表结构初始化完成"
+  log "数据库表结构初始化完成（宿主机 Node 阶段结束）"
 }
 
 docker_compose_up() {
-  log "启动 Docker 服务..."
   cd "${COMPOSE_DIR}"
-  docker compose build --pull app 2>/dev/null || docker compose build app
+  echo ""
+  log "=========================================="
+  log "下一步: 构建 Docker 应用镜像（不是卡死）"
+  log "首次需拉取 node:22 镜像并在容器内 npm install"
+  log "国外 VPS 约 5–15 分钟，慢网可能 20–40 分钟"
+  log "另开 SSH 可看进度: cd ${COMPOSE_DIR} && docker compose build --progress=plain app"
+  log "=========================================="
+  echo ""
+
+  export DOCKER_BUILDKIT=1
+  docker compose build --progress=plain app
+
+  log "镜像构建完成，正在启动容器..."
   docker compose up -d
-  log "等待应用就绪..."
+
+  log "等待应用就绪（/auth/captcha）..."
   local i
   for i in $(seq 1 30); do
     if curl -sf "http://127.0.0.1:${APP_PORT}/auth/captcha" >/dev/null 2>&1; then
