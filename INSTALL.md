@@ -56,7 +56,30 @@ docker compose build app
 docker compose up -d
 ```
 
-## 6. 故障排查
+## 6. 卸载
+
+交互式：
+
+```bash
+sudo ./install.sh   # 选 [5] 或 [4] → [d]
+```
+
+非交互：
+
+```bash
+# 只停服务，保留数据库卷（可重装恢复）
+sudo ./install.sh --uninstall -y
+
+# 清空 MySQL 数据
+sudo ./install.sh --uninstall --purge-data -y
+
+# 完全移除（目录 + 数据卷 + 可选证书）
+sudo ./install.sh --uninstall --purge-all --remove-cert -y
+```
+
+卸载**不会**自动删除系统级的 Docker、Nginx、Certbot、Node.js。
+
+## 7. 故障排查
 
 ```bash
 sudo ./install.sh --health

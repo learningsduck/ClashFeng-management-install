@@ -26,11 +26,27 @@ sudo ./install.sh
 ## 维护命令
 
 ```bash
-sudo ./install.sh          # 交互菜单 → [4] 维护工具
+sudo ./install.sh          # 交互菜单 → [4] 维护 / [5] 卸载
 sudo ./install.sh --health
 sudo ./install.sh --renew-cert
 sudo ./install.sh --show-info
 ```
+
+## 一键卸载
+
+```bash
+sudo ./install.sh                    # 主菜单 [5] 或 维护 [d]
+sudo ./install.sh --uninstall -y     # 仅停容器 + 移除 Nginx 配置，保留数据卷与目录
+sudo ./install.sh --uninstall --purge-data -y    # 同时删除 MySQL 数据卷
+sudo ./install.sh --uninstall --purge-all --remove-cert -y   # 彻底删除（含目录与证书）
+```
+
+| 选项 | 作用 |
+|------|------|
+| `--purge-data` | `docker compose down -v`，清空数据库 |
+| `--purge-all` | 删除 `/opt/clashfeng` 整个目录 |
+| `--purge-images` | 删除本机构建的 Docker 镜像 |
+| `--remove-cert` | `certbot delete` 删除域名证书 |
 
 ## 多 VPS 容灾
 

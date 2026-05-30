@@ -16,11 +16,13 @@ source "${SCRIPT_DIR}/lib/app.sh"
 source "${SCRIPT_DIR}/lib/nginx.sh"
 # shellcheck source=/dev/null
 source "${SCRIPT_DIR}/lib/health.sh"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/lib/uninstall.sh"
 
 banner() {
   echo -e "${CYAN}"
   echo "╔══════════════════════════════════════════════════════╗"
-  echo "║     ClashFeng 管理后台 + API 一键安装  v1.0.0        ║"
+  echo "║     ClashFeng 管理后台 + API 一键安装  v1.1.0        ║"
   echo "║     CentOS 7/8/9 · 宿主机 Nginx · Docker MySQL      ║"
   echo "╚══════════════════════════════════════════════════════╝"
   echo -e "${NC}"
@@ -33,14 +35,16 @@ main_menu() {
   echo "  [2] API 备用节点 — 连接远程主库 (容灾)"
   echo "  [3] 仅数据库主库 — 无 Nginx / 无 App"
   echo "  [4] 维护工具"
+  echo "  [5] 一键卸载"
   echo "  [0] 退出"
   echo ""
-  read -r -p "请输入选项 [0-4]: " choice
+  read -r -p "请输入选项 [0-5]: " choice
   case "${choice}" in
     1) INSTALL_ROLE=all-in-one; run_all_in_one ;;
     2) INSTALL_ROLE=api-standby; run_api_standby ;;
     3) INSTALL_ROLE=db-only; run_db_only ;;
     4) maintenance_menu ;;
+    5) uninstall_menu; main_menu ;;
     0) exit 0 ;;
     *) err "无效选项"; main_menu ;;
   esac
@@ -52,12 +56,14 @@ maintenance_menu() {
   echo "  [a] 健康检查"
   echo "  [b] 续签 Let's Encrypt 证书"
   echo "  [c] 查看 install-info (密钥已脱敏)"
+  echo "  [d] 一键卸载"
   echo "  [0] 返回"
   read -r -p "请选择: " m
   case "${m}" in
     a) health_check || true; main_menu ;;
     b) renew_cert; main_menu ;;
     c) show_install_info; main_menu ;;
+    d) uninstall_menu; main_menu ;;
     0) main_menu ;;
     *) maintenance_menu ;;
   esac
@@ -241,6 +247,25 @@ parse_args() {
       --health) health_check; exit $? ;;
       --renew-cert) need_root; renew_cert; exit 0 ;;
       --show-info) show_install_info; exit 0 ;;
+      --uninstall)
+        need_root
+        load_install_info
+        UNINSTALL_YES=1
+        REMOVE_NGINX=1
+        shift
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            --purge-data) PURGE_DATA=1; shift ;;
+            --purge-all) PURGE_ALL=1; PURGE_DATA=1; shift ;;
+            --purge-images) PURGE_IMAGES=1; shift ;;
+            --remove-cert) REMOVE_CERT=1; shift ;;
+            -y|--yes) UNINSTALL_YES=1; shift ;;
+            *) break ;;
+          esac
+        done
+        run_uninstall
+        exit 0
+        ;;
       --role=*) INSTALL_ROLE="${1#*=}"; shift ;;
       --domain=*) DOMAIN="${1#*=}"; shift ;;
       --email=*) ADMIN_EMAIL="${1#*=}"; shift ;;
@@ -251,6 +276,7 @@ parse_args() {
         echo "  --health          健康检查"
         echo "  --renew-cert      续签证书"
         echo "  --show-info       查看安装信息"
+        echo "  --uninstall       卸载 (可加 --purge-data --purge-all --remove-cert -y)"
         echo "  --role=all-in-one|api-standby|db-only"
         echo "  --domain= --email= --dir=  非交互安装 (需配合 -y)"
         exit 0
