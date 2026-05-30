@@ -84,8 +84,15 @@ prompt() {
 prompt_yn() {
   local message="$1"
   local default="${2:-Y}"
-  local value
-  read -r -p "${message} [${default}/n]: " value
+  local hint value
+  if [[ "${default}" =~ ^[Yy] ]]; then
+    hint="Y/n"
+    default="Y"
+  else
+    hint="y/N"
+    default="n"
+  fi
+  read -r -p "${message} [${hint}]: " value
   value="${value:-$default}"
   [[ "${value}" =~ ^[Yy] ]]
 }
