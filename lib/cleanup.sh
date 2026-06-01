@@ -39,8 +39,9 @@ mysql_root_password_works() {
   local root_pw="$1"
   local compose_dir="$2"
   [[ -n "${root_pw}" && -d "${compose_dir}" ]] || return 1
+  # 须用 mysql 客户端校验密码；仅 mysqladmin ping 可能在初始化阶段误报成功
   docker compose -f "${compose_dir}/docker-compose.yml" exec -T mysql \
-    mysqladmin ping -h localhost -uroot -p"${root_pw}" &>/dev/null
+    mysql -uroot -p"${root_pw}" -e "SELECT 1" &>/dev/null
 }
 
 # 读取即将用于安装的 root 密码（优先 compose/.env，其次 install-info）
@@ -55,38 +56,39 @@ mysql_root_password_from_config() {
   printf '%s' "${pw}"
 }
 
-# 安装前：若存在旧数据卷但密码与配置不一致，自动清卷，避免 root Access denied
+# 安装前：仅当「本次启动前已存在」数据卷时校验密码（避免新卷初始化中被误判）
 ensure_mysql_volume_matches_config() {
   [[ -f "${COMPOSE_DIR}/docker-compose.yml" ]] || return 0
   grep -q "mysql:" "${COMPOSE_DIR}/docker-compose.yml" 2>/dev/null || return 0
-
-  local vols
-  vols="$(clashfeng_mysql_volumes | tr '\n' ' ')"
-  [[ -n "${vols// }" ]] || return 0
+  [[ "${INSTALL_MYSQL_VOLUME_PREEXISTED:-0}" == "1" ]] || return 0
 
   local root_pw
   root_pw="$(mysql_root_password_from_config)"
 
   if [[ -z "${root_pw}" ]]; then
-    warn "检测到 MySQL 数据卷（${vols}）但无 MYSQL_ROOT_PASSWORD 配置，将清空数据卷"
+    warn "检测到旧 MySQL 数据卷但无 MYSQL_ROOT_PASSWORD，将清空数据卷"
     compose_down_with_volumes "${COMPOSE_DIR}"
-    return 0
+    remove_stale_install_configs
+    return 1
   fi
 
   if ! docker compose -f "${COMPOSE_DIR}/docker-compose.yml" ps mysql 2>/dev/null | grep -qE 'running|Up'; then
     return 0
   fi
 
-  if mysql_root_password_works "${root_pw}" "${COMPOSE_DIR}"; then
-    log "MySQL 数据卷与当前配置密码一致"
-    return 0
-  fi
+  local i
+  for i in $(seq 1 15); do
+    if mysql_root_password_works "${root_pw}" "${COMPOSE_DIR}"; then
+      log "MySQL 数据卷与当前配置密码一致"
+      return 0
+    fi
+    sleep 2
+  done
 
   warn "MySQL 数据卷密码与 .env/install-info 不一致（重装常见原因），自动清空数据卷..."
   compose_down_with_volumes "${COMPOSE_DIR}"
-  # 新安装将使用 generate_secrets 生成的新密码
-  unset MYSQL_ROOT_PASSWORD MYSQL_PASSWORD JWT_SECRET ADMIN_INIT_SECRET 2>/dev/null || true
-  rm -f "${COMPOSE_DIR}/.env" "${APP_DIR}/.env" "${INSTALL_INFO}" 2>/dev/null || true
+  remove_stale_install_configs
+  return 1
 }
 
 # 删除安装目录内会导致重装冲突的文件（在未 purge-all 时可选）

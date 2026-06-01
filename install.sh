@@ -146,6 +146,7 @@ run_all_in_one() {
   MYSQL_PORT=3306
   MYSQL_DATABASE="${MYSQL_DATABASE}"
   MYSQL_USER="${MYSQL_USER}"
+  clear_stale_install_env
   generate_secrets
   confirm_install
 

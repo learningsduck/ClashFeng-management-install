@@ -141,11 +141,25 @@ docker_compose_mysql_up() {
   fi
   log "启动 Docker MySQL..."
   cd "${COMPOSE_DIR}"
+
+  INSTALL_MYSQL_VOLUME_PREEXISTED=0
+  if [[ -n "$(clashfeng_mysql_volumes | head -1)" ]]; then
+    INSTALL_MYSQL_VOLUME_PREEXISTED=1
+  fi
+
   docker compose up -d mysql
   wait_mysql_container_up
-  ensure_mysql_volume_matches_config
-  docker compose up -d mysql 2>/dev/null || true
-  wait_mysql_container_up
+
+  if ! ensure_mysql_volume_matches_config; then
+    log "已清空旧数据卷，使用新密钥重新配置..."
+    unset MYSQL_ROOT_PASSWORD MYSQL_PASSWORD JWT_SECRET ADMIN_INIT_SECRET 2>/dev/null || true
+    generate_secrets
+    write_app_env
+    docker compose up -d mysql
+    wait_mysql_container_up
+    INSTALL_MYSQL_VOLUME_PREEXISTED=0
+  fi
+
   wait_mysql_healthy
   bootstrap_mysql_users
 }
@@ -219,16 +233,18 @@ docker_compose_up() {
 }
 
 wait_mysql_healthy() {
-  log "等待 MySQL 就绪..."
+  log "等待 MySQL 就绪（含 root 密码校验）..."
   cd "${COMPOSE_DIR}"
+  local root_pw="${MYSQL_ROOT_PASSWORD:-}"
+  if [[ -z "${root_pw}" && -f "${COMPOSE_DIR}/.env" ]]; then
+    root_pw="$(grep -m1 '^MYSQL_ROOT_PASSWORD=' "${COMPOSE_DIR}/.env" | cut -d= -f2- || true)"
+  fi
+  [[ -n "${root_pw}" ]] || die "缺少 MYSQL_ROOT_PASSWORD"
+
   local i
   for i in $(seq 1 60); do
-    if docker compose ps mysql 2>/dev/null | grep -q healthy; then
-      log "MySQL 健康检查通过"
-      return 0
-    fi
-    if docker compose exec -T mysql mysqladmin ping -h localhost -u root -p"${MYSQL_ROOT_PASSWORD}" &>/dev/null; then
-      log "MySQL 已响应"
+    if mysql_root_password_works "${root_pw}" "${COMPOSE_DIR}"; then
+      log "MySQL 就绪（root 可登录）"
       return 0
     fi
     sleep 2

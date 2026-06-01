@@ -13,6 +13,12 @@ bootstrap_mysql_users() {
   cd "${COMPOSE_DIR}"
   log "同步 MySQL 用户 ${MYSQL_USER}（修复宿主机连接 Access denied）..."
 
+  local root_pw="${MYSQL_ROOT_PASSWORD:-}"
+  if [[ -z "${root_pw}" && -f "${COMPOSE_DIR}/.env" ]]; then
+    root_pw="$(grep -m1 '^MYSQL_ROOT_PASSWORD=' "${COMPOSE_DIR}/.env" | cut -d= -f2- || true)"
+  fi
+  [[ -n "${root_pw}" ]] || die "缺少 MYSQL_ROOT_PASSWORD，请检查 ${COMPOSE_DIR}/.env"
+
   local sql
   sql="CREATE DATABASE IF NOT EXISTS \`${MYSQL_DATABASE}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE USER IF NOT EXISTS '${MYSQL_USER}'@'%' IDENTIFIED BY '${MYSQL_PASSWORD}';
@@ -23,7 +29,7 @@ GRANT ALL PRIVILEGES ON \`${MYSQL_DATABASE}\`.* TO '${MYSQL_USER}'@'%';
 GRANT ALL PRIVILEGES ON \`${MYSQL_DATABASE}\`.* TO '${MYSQL_USER}'@'localhost';
 FLUSH PRIVILEGES;"
 
-  if ! docker compose exec -T mysql mysql -uroot -p"${MYSQL_ROOT_PASSWORD}" --default-character-set=utf8mb4 -e "${sql}" 2>/dev/null; then
+  if ! docker compose exec -T mysql mysql -uroot -p"${root_pw}" --default-character-set=utf8mb4 -e "${sql}" 2>/dev/null; then
     warn "mysql_native_password 可能不适用，尝试 caching_sha2 默认方式..."
     sql="CREATE DATABASE IF NOT EXISTS \`${MYSQL_DATABASE}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE USER IF NOT EXISTS '${MYSQL_USER}'@'%' IDENTIFIED BY '${MYSQL_PASSWORD}';
@@ -33,7 +39,7 @@ ALTER USER '${MYSQL_USER}'@'localhost' IDENTIFIED BY '${MYSQL_PASSWORD}';
 GRANT ALL PRIVILEGES ON \`${MYSQL_DATABASE}\`.* TO '${MYSQL_USER}'@'%';
 GRANT ALL PRIVILEGES ON \`${MYSQL_DATABASE}\`.* TO '${MYSQL_USER}'@'localhost';
 FLUSH PRIVILEGES;"
-    docker compose exec -T mysql mysql -uroot -p"${MYSQL_ROOT_PASSWORD}" --default-character-set=utf8mb4 -e "${sql}"
+    docker compose exec -T mysql mysql -uroot -p"${root_pw}" --default-character-set=utf8mb4 -e "${sql}"
   fi
 
   log "验证业务用户连接..."
