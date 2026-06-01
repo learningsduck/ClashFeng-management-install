@@ -25,7 +25,7 @@ health_check() {
     ok=0
   fi
 
-  if [[ -n "${DOMAIN:-}" && "${TLS_MODE:-letsencrypt-auto}" != "http" ]]; then
+  if [[ -n "${DOMAIN:-}" && "${DOMAIN}" != "_" && "${TLS_MODE:-}" != "http" && "${TLS_MODE:-}" != "deferred" ]]; then
     if curl -sfk "https://${DOMAIN}/auth/captcha" >/dev/null 2>&1 || curl -sf "https://${DOMAIN}/auth/captcha" >/dev/null 2>&1; then
       echo -e "${GREEN}OK${NC} HTTPS https://${DOMAIN}/auth/captcha"
     else

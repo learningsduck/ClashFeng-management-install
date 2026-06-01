@@ -84,13 +84,63 @@ is_ip_address() {
 }
 
 prompt_domain_cert() {
-  prompt DOMAIN "域名 (管理后台与 API 同域)" "${DOMAIN:-}"
-  if is_ip_address "${DOMAIN}"; then
-    warn "使用 IP 作为访问地址，将跳过 Let's Encrypt（仅 HTTP）"
-    TLS_MODE=http
-    SKIP_CERT=1
-    REQUIRE_HTTPS=false
+  if [[ "${ASSUME_YES:-0}" == "1" ]]; then
+    if [[ "${TLS_MODE:-}" == "deferred" ]]; then
+      DOMAIN="${DOMAIN:-}"
+      SKIP_CERT=1
+      REQUIRE_HTTPS=false
+      SKIP_DNS_CHECK=1
+      log "访问地址: 稍后配置（--tls=deferred）"
+      return 0
+    fi
+    prompt DOMAIN "域名 (管理后台与 API 同域)" "${DOMAIN:-}"
+    if is_ip_address "${DOMAIN}"; then
+      warn "使用 IP 作为访问地址，将跳过 Let's Encrypt（仅 HTTP）"
+      TLS_MODE=http
+      SKIP_CERT=1
+      REQUIRE_HTTPS=false
+    fi
+    if [[ "${SKIP_DNS_CHECK:-0}" != "1" ]]; then
+      SKIP_DNS_CHECK=0
+    fi
+    return 0
   fi
+
+  echo ""
+  echo "访问地址 / 域名（管理后台与 API 同域）:"
+  echo "  [1] 填写域名（用于 HTTP/HTTPS 与证书）"
+  echo "  [2] 填写 IP 地址（仅 HTTP，无法自动申请证书）"
+  echo "  [3] 稍后配置（先完成安装，稍后在主菜单 [4] 设置域名与证书目录）"
+  read -r -p "请选择 [1-3] [1]: " dsel
+  dsel="${dsel:-1}"
+  case "${dsel}" in
+    1)
+      prompt DOMAIN "域名" "${DOMAIN:-}"
+      if is_ip_address "${DOMAIN}"; then
+        TLS_MODE=http
+        SKIP_CERT=1
+        REQUIRE_HTTPS=false
+      fi
+      ;;
+    2)
+      prompt DOMAIN "IP 地址" "${DOMAIN:-}"
+      is_ip_address "${DOMAIN}" || die "请填写有效 IPv4 地址"
+      TLS_MODE=http
+      SKIP_CERT=1
+      REQUIRE_HTTPS=false
+      ;;
+    3)
+      DOMAIN=""
+      TLS_MODE=deferred
+      SKIP_CERT=1
+      REQUIRE_HTTPS=false
+      SKIP_DNS_CHECK=1
+      log "已选: 稍后配置域名与 HTTPS/证书（安装后使用主菜单 [4]）"
+      return 0
+      ;;
+    *) die "无效选项" ;;
+  esac
+
   if [[ "${SKIP_DNS_CHECK:-0}" == "1" ]]; then
     :
   elif prompt_yn "检查 DNS 是否指向本机公网 IP?" "Y"; then
@@ -118,7 +168,9 @@ confirm_install() {
   echo ""
   echo -e "${CYAN}══════════════ 安装摘要 ══════════════${NC}"
   echo "  角色:     ${INSTALL_ROLE}"
-  if [[ "${TLS_MODE:-}" == "http" || "${SKIP_CERT:-0}" == "1" ]]; then
+  if is_tls_deferred 2>/dev/null || [[ "${TLS_MODE:-}" == "deferred" ]]; then
+    echo "  访问地址: （稍后配置）安装后主菜单 [4] 设置域名与证书"
+  elif [[ "${TLS_MODE:-}" == "http" || "${SKIP_CERT:-0}" == "1" ]]; then
     echo "  访问地址: http://${DOMAIN}/"
   else
     echo "  访问地址: https://${DOMAIN}/"
@@ -137,7 +189,11 @@ show_done() {
   save_install_info
   echo ""
   echo -e "${GREEN}════════════════ 安装完成 ════════════════${NC}"
-  if [[ "${TLS_MODE:-}" == "http" ]]; then
+  if [[ "${TLS_MODE:-}" == "deferred" ]]; then
+    echo "  API 已运行: http://127.0.0.1:${APP_PORT:-3001}/auth/captcha"
+    echo "  域名/HTTPS: 尚未配置。请运行本脚本主菜单 [4] → [6] 设置域名 → [1]/[2] 选证书方式 → [4] 应用"
+    echo "  （应用证书仅重载 Nginx，不影响 MySQL 与 API 服务）"
+  elif [[ "${TLS_MODE:-}" == "http" ]]; then
     echo "  管理后台: http://${DOMAIN}/"
     echo "  API 示例: http://${DOMAIN}/auth/captcha"
   else
@@ -148,7 +204,9 @@ show_done() {
   echo ""
   echo "  首次使用: 运行本脚本 [5] 创建管理员，再访问下方管理后台地址"
   show_admin_panel_url
-  echo "  公网首页 https://${DOMAIN}/ 仅为中性门户，不暴露管理功能"
+  if [[ "${TLS_MODE:-}" != "deferred" && -n "${DOMAIN:-}" ]]; then
+  echo "  公网首页为中性门户页，管理功能仅在隐藏路径 ${ADMIN_PANEL_PATH:-} 提供"
+  fi
   echo ""
   if [[ "${INSTALL_ROLE}" == "all-in-one" ]]; then
     echo "  备用 VPS: 运行本脚本选 [2]，填写主库地址与相同 JWT_SECRET"
@@ -160,7 +218,9 @@ show_done() {
 
 run_all_in_one() {
   prompt_domain_cert
-  prompt_tls_settings
+  if [[ "${TLS_MODE:-}" != "deferred" ]]; then
+    prompt_tls_settings
+  fi
   prompt_security
   MYSQL_HOST=127.0.0.1
   MYSQL_PORT=3306
@@ -184,7 +244,15 @@ run_all_in_one() {
   start_host_app_service
 
   install_nginx_certbot
-  apply_tls_configuration || warn "HTTPS 配置未完全成功，可稍后在主菜单 [4] 重试"
+  if [[ "${TLS_MODE:-}" == "deferred" ]]; then
+    apply_tls_deferred_bootstrap
+  else
+    if apply_tls_configuration; then
+      sync_require_https_to_app
+    else
+      warn "HTTPS 配置未完全成功，可稍后在主菜单 [4] 重试"
+    fi
+  fi
 
   show_done
 }
@@ -193,7 +261,9 @@ run_api_standby() {
   echo ""
   echo -e "${YELLOW}备用节点: JWT_SECRET 必须与主站完全相同${NC}"
   prompt_domain_cert
-  prompt_tls_settings
+  if [[ "${TLS_MODE:-}" != "deferred" ]]; then
+    prompt_tls_settings
+  fi
   prompt INSTALL_DIR "安装根目录" "${INSTALL_DIR}"
   COMPOSE_DIR="${INSTALL_DIR}/compose"
   APP_DIR="${INSTALL_DIR}/app"
@@ -205,7 +275,15 @@ run_api_standby() {
   prompt JWT_SECRET "JWT_SECRET (从主站 install-info 复制)" ""
   prompt ADMIN_INIT_SECRET "ADMIN_INIT_SECRET (与主站一致)" ""
   prompt ADMIN_IP_WHITELIST "管理后台 IP 白名单 (可选)" "${ADMIN_IP_WHITELIST:-}"
-  REQUIRE_HTTPS=true
+  if [[ "${TLS_MODE:-}" == "deferred" || "${SKIP_CERT:-0}" == "1" || "${TLS_MODE:-}" == "http" ]]; then
+    REQUIRE_HTTPS=false
+  elif [[ "${ASSUME_YES:-0}" == "1" ]]; then
+    REQUIRE_HTTPS=true
+  elif prompt_yn "生产环境强制 HTTPS (REQUIRE_HTTPS)?" "Y"; then
+    REQUIRE_HTTPS=true
+  else
+    REQUIRE_HTTPS=false
+  fi
   confirm_install
 
   mkdir_p "${INSTALL_DIR}" "${COMPOSE_DIR}" "${APP_DIR}"
@@ -226,7 +304,15 @@ run_api_standby() {
   start_host_app_service
 
   install_nginx_certbot
-  apply_tls_configuration || warn "HTTPS 配置未完全成功"
+  if [[ "${TLS_MODE:-}" == "deferred" ]]; then
+    apply_tls_deferred_bootstrap
+  else
+    if apply_tls_configuration; then
+      sync_require_https_to_app
+    else
+      warn "HTTPS 配置未完全成功，可稍后在主菜单 [4] 重试"
+    fi
+  fi
 
   show_done
 }
@@ -305,7 +391,17 @@ parse_args() {
       --dir=*) INSTALL_DIR="${1#*=}"; COMPOSE_DIR="${INSTALL_DIR}/compose"; APP_DIR="${INSTALL_DIR}/app"; shift ;;
       --skip-dns-check) SKIP_DNS_CHECK=1; shift ;;
       --skip-cert) SKIP_CERT=1; TLS_MODE=http; REQUIRE_HTTPS=false; shift ;;
-      --tls=*) TLS_MODE="${1#*=}"; shift ;;
+      --defer-tls|--defer-cert) TLS_MODE=deferred; SKIP_CERT=1; REQUIRE_HTTPS=false; shift ;;
+      --tls=*)
+        TLS_MODE="${1#*=}"
+        case "${TLS_MODE}" in
+          auto) TLS_MODE=letsencrypt-auto ;;
+          manual) TLS_MODE=letsencrypt-manual ;;
+          deferred) SKIP_CERT=1; REQUIRE_HTTPS=false ;;
+          http) SKIP_CERT=1; REQUIRE_HTTPS=false ;;
+        esac
+        shift
+        ;;
       --cert-dir=*) SSL_CERT_DIR="${1#*=}"; TLS_MODE=letsencrypt-manual; shift ;;
       --cert-fullchain=*) SSL_CERT_DIR="$(dirname "${1#*=}")"; SSL_CERT_PATH="${1#*=}"; TLS_MODE=letsencrypt-manual; shift ;;
       --cert-key=*) SSL_KEY_PATH="${1#*=}"; TLS_MODE=letsencrypt-manual; shift ;;
@@ -320,7 +416,8 @@ parse_args() {
         echo "  --domain= --email= --dir=  非交互安装 (需配合 -y)"
         echo "  --skip-dns-check  跳过 DNS 与公网 IP 校验"
         echo "  --skip-cert       仅 HTTP（无 Let's Encrypt）"
-        echo "  --tls=auto|manual|http  证书模式（manual 需配合 --cert-dir=/path/to/certs）"
+        echo "  --defer-tls       暂不配置域名与证书（安装后菜单 [4] 配置）"
+        echo "  --tls=auto|manual|http|deferred  证书模式（manual 需 --cert-dir=）"
         exit 0
         ;;
       *) die "未知参数: $1" ;;

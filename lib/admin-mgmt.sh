@@ -37,9 +37,13 @@ show_admin_panel_url() {
   if [[ "${TLS_MODE:-}" == "http" || "${SKIP_CERT:-0}" == "1" ]]; then
     scheme="http"
   fi
-  if [[ -n "${DOMAIN:-}" && "${DOMAIN}" != "db-local" ]]; then
+  if [[ -n "${DOMAIN:-}" && "${DOMAIN}" != "db-local" && "${DOMAIN}" != "_" ]]; then
     echo -e "  ${CYAN}管理后台入口（请妥善保存，勿公开）:${NC}"
     echo "    ${scheme}://${DOMAIN}${ADMIN_PANEL_PATH}"
+  elif [[ "${TLS_MODE:-}" == "deferred" ]]; then
+    echo -e "  ${CYAN}管理后台（本地，配置域名后请用 Nginx 地址访问）:${NC}"
+    echo "    http://127.0.0.1:${APP_PORT:-3001}${ADMIN_PANEL_PATH}"
+    echo "  配置域名与 HTTPS: 主菜单 [4]"
   else
     echo "  管理后台路径: ${ADMIN_PANEL_PATH}"
   fi

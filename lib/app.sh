@@ -71,6 +71,26 @@ EOF
   mkdir_p "${APP_DIR}/data"
 }
 
+sync_require_https_to_app() {
+  load_install_info 2>/dev/null || true
+  APP_DIR="${APP_DIR:-/opt/clashfeng/app}"
+  COMPOSE_DIR="${COMPOSE_DIR:-/opt/clashfeng/compose}"
+  local val="${REQUIRE_HTTPS:-false}"
+  local f
+  for f in "${COMPOSE_DIR}/.env" "${APP_DIR}/.env"; do
+    [[ -f "${f}" ]] || continue
+    if grep -q '^REQUIRE_HTTPS=' "${f}"; then
+      sed -i "s/^REQUIRE_HTTPS=.*/REQUIRE_HTTPS=${val}/" "${f}"
+    else
+      echo "REQUIRE_HTTPS=${val}" >> "${f}"
+    fi
+  done
+  if systemctl is-enabled clashfeng-auth &>/dev/null 2>&1; then
+    systemctl restart clashfeng-auth
+    log "已同步 REQUIRE_HTTPS=${val} 并重启 clashfeng-auth"
+  fi
+}
+
 write_compose_file() {
   local tpl="${SCRIPT_DIR}/templates/docker-compose.${INSTALL_ROLE}.yml"
   [[ -f "${tpl}" ]] || die "缺少模板: ${tpl}"

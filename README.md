@@ -18,8 +18,15 @@ sudo ./install.sh
 
 安装完成后：
 
-- 管理后台：`https://你的域名/`
+- 管理后台：`https://你的域名/`（安装时也可选「稍后配置域名/证书」，完成后在主菜单 **[4] HTTPS/TLS** 设置）
 - 密钥文件：`/opt/clashfeng/install-info.env`（权限 600）
+
+非交互示例（先装服务，后配证书）：
+
+```bash
+sudo ./install.sh -y --role=all-in-one --defer-tls --dir=/opt/clashfeng
+# 安装后：sudo ./install.sh → [4] → [6] 填域名 → [2] 证书目录 → [4] 应用
+```
 
 详细说明见 [INSTALL.md](./INSTALL.md)。
 

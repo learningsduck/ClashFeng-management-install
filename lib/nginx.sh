@@ -4,9 +4,20 @@ set -euo pipefail
 # shellcheck source=lib/common.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/common.sh"
 
+nginx_server_name() {
+  if [[ -n "${DOMAIN:-}" && "${DOMAIN}" != "_" ]]; then
+    echo "${DOMAIN}"
+  else
+    echo "_"
+  fi
+}
+
 install_nginx_site() {
   log "配置 Nginx 反向代理..."
+  local saved_domain="${DOMAIN:-}"
+  DOMAIN="$(nginx_server_name)"
   render_template "${SCRIPT_DIR}/templates/nginx.conf.tpl" "/etc/nginx/conf.d/clashfeng.conf"
+  DOMAIN="${saved_domain}"
   nginx -t
   systemctl reload nginx
 }

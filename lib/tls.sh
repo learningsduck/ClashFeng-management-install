@@ -81,8 +81,21 @@ tls_mode_label() {
     letsencrypt-auto) echo "Let's Encrypt 自动申请 + 自动续签" ;;
     letsencrypt-manual) echo "自定义证书目录（自备证书文件）" ;;
     http) echo "仅 HTTP（无 TLS）" ;;
+    deferred) echo "稍后配置（安装时未设域名/证书）" ;;
     *) echo "未设置" ;;
   esac
+}
+
+is_tls_deferred() {
+  [[ "${TLS_MODE:-}" == "deferred" ]]
+}
+
+ensure_domain_for_tls_apply() {
+  if [[ -n "${DOMAIN:-}" && "${DOMAIN}" != "_" ]]; then
+    return 0
+  fi
+  prompt DOMAIN "域名 (证书与访问同域)" "${DOMAIN:-}"
+  [[ -n "${DOMAIN}" && "${DOMAIN}" != "_" ]] || die "请填写有效域名后再配置 HTTPS"
 }
 
 prompt_tls_email_and_domain() {
@@ -177,12 +190,16 @@ obtain_le_certificate() {
 install_nginx_https_site() {
   resolve_ssl_paths_from_dir || die "无法解析证书目录 ${SSL_CERT_DIR}"
   log "配置 Nginx HTTPS..."
+  local saved_domain="${DOMAIN:-}"
+  DOMAIN="$(nginx_server_name)"
   render_template "${SCRIPT_DIR}/templates/nginx-https.conf.tpl" "/etc/nginx/conf.d/clashfeng.conf"
+  DOMAIN="${saved_domain}"
   nginx -t
   systemctl reload nginx
 }
 
 apply_tls_letsencrypt_auto() {
+  TLS_MODE=letsencrypt-auto
   REQUIRE_HTTPS=true
   SKIP_CERT=0
   check_dns || true
@@ -206,6 +223,7 @@ apply_tls_letsencrypt_auto() {
 }
 
 apply_tls_letsencrypt_manual_dir() {
+  TLS_MODE=letsencrypt-manual
   REQUIRE_HTTPS=true
   SKIP_CERT=0
   [[ -n "${SSL_CERT_DIR}" ]] || prompt_manual_cert_dir
@@ -240,16 +258,33 @@ apply_tls_http_only() {
     REQUIRE_HTTPS=false
   fi
   install_nginx_site
-  warn "仅 HTTP: http://${DOMAIN}/"
+  if [[ -n "${DOMAIN:-}" && "${DOMAIN}" != "_" ]]; then
+    warn "仅 HTTP: http://${DOMAIN}/"
+  else
+    warn "仅 HTTP（未绑定域名，可通过 IP 或本机访问）"
+  fi
+}
+
+apply_tls_deferred_bootstrap() {
+  TLS_MODE=deferred
+  SKIP_CERT=1
+  REQUIRE_HTTPS=false
+  install_nginx_site
+  log "已启用 HTTP 反向代理（域名与 HTTPS 可稍后在主菜单 [4] 配置，不影响 API 与数据库）"
 }
 
 apply_tls_configuration() {
+  if is_tls_deferred; then
+    apply_tls_deferred_bootstrap
+    return 0
+  fi
+
   if [[ "${SKIP_CERT:-0}" == "1" || "${TLS_MODE:-}" == "http" ]]; then
     apply_tls_http_only
     return 0
   fi
 
-  [[ -n "${DOMAIN:-}" ]] || die "缺少域名，无法配置 HTTPS"
+  ensure_domain_for_tls_apply
   prompt_tls_email_and_domain
 
   case "${TLS_MODE:-letsencrypt-auto}" in
@@ -287,56 +322,87 @@ tls_renew_now() {
   log "证书续签检查完成"
 }
 
+tls_apply_saved_config() {
+  [[ -f "${INSTALL_INFO}" ]] || die "请先完成主站安装"
+  load_install_info
+  if is_tls_deferred && [[ "${TLS_MODE:-}" != "http" ]]; then
+    :
+  elif [[ "${TLS_MODE:-}" != "http" && "${SKIP_CERT:-0}" != "1" ]]; then
+    ensure_domain_for_tls_apply
+  fi
+  install_nginx_certbot
+  apply_tls_configuration
+  save_install_info
+  # shellcheck source=lib/app.sh
+  source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/app.sh"
+  sync_require_https_to_app
+}
+
 tls_main_menu() {
   load_install_info 2>/dev/null || true
 
   echo ""
   echo -e "${CYAN}════════════ HTTPS / TLS 证书 ════════════${NC}"
   echo "  当前模式: $(tls_mode_label)"
-  [[ -n "${DOMAIN:-}" ]] && echo "  域名:     ${DOMAIN}"
+  if [[ -n "${DOMAIN:-}" && "${DOMAIN}" != "_" ]]; then
+    echo "  域名:     ${DOMAIN}"
+  else
+    echo "  域名:     （未设置，可先选 [6]）"
+  fi
   [[ -n "${SSL_CERT_DIR:-}" ]] && echo "  证书目录: ${SSL_CERT_DIR}"
   echo ""
   echo "  [1] 自动申请 Let's Encrypt（Certbot 管理，目录 /etc/letsencrypt/live/域名/）"
   echo "  [2] 使用自定义证书目录（自备 fullchain.pem + privkey.pem）"
   echo "  [3] 仅 HTTP / 跳过 HTTPS"
-  echo "  [4] 立即应用当前证书配置（已安装服务时）"
+  echo "  [4] 立即应用当前证书配置（已安装服务时，不中断业务）"
   echo "  [5] 手动触发证书续签检查"
+  echo "  [6] 设置或修改域名"
   echo "  [0] 返回主菜单"
   echo ""
-  read -r -p "请选择 [0-5]: " tchoice
+  read -r -p "请选择 [0-6]: " tchoice
 
   case "${tchoice}" in
     1)
       TLS_MODE=letsencrypt-auto
+      SKIP_CERT=0
+      ensure_domain_for_tls_apply
       prompt_tls_email_and_domain
       save_install_info
-      log "已保存: $(tls_mode_label)"
+      log "已保存: $(tls_mode_label)。请选 [4] 应用配置"
       ;;
     2)
       TLS_MODE=letsencrypt-manual
-      prompt DOMAIN "域名" "${DOMAIN:-}"
+      SKIP_CERT=0
+      ensure_domain_for_tls_apply
       prompt_manual_cert_dir
       save_install_info
-      log "已保存: $(tls_mode_label)"
+      log "已保存: $(tls_mode_label)。请选 [4] 应用配置"
       ;;
     3)
       TLS_MODE=http
       SKIP_CERT=1
       REQUIRE_HTTPS=false
-      prompt DOMAIN "域名或 IP" "${DOMAIN:-}"
+      if [[ -z "${DOMAIN:-}" || "${DOMAIN}" == "_" ]]; then
+        prompt DOMAIN "域名或 IP（可选，用于 Nginx server_name）" "${DOMAIN:-}"
+      fi
       save_install_info
-      log "已保存: $(tls_mode_label)"
+      log "已保存: $(tls_mode_label)。请选 [4] 应用配置"
       ;;
     4)
-      [[ -f "${INSTALL_INFO}" ]] || die "请先完成安装或先选 [1]/[2] 保存配置"
-      load_install_info
-      install_nginx_certbot
-      apply_tls_configuration
-      save_install_info
+      tls_apply_saved_config
       health_check || true
       ;;
     5)
       tls_renew_now
+      ;;
+    6)
+      prompt DOMAIN "域名 (证书与访问同域)" "${DOMAIN:-}"
+      [[ -n "${DOMAIN}" && "${DOMAIN}" != "_" ]] || die "请填写有效域名"
+      if is_ip_address "${DOMAIN}"; then
+        warn "IP 地址无法申请 Let's Encrypt，HTTPS 请使用 [2] 自备证书目录"
+      fi
+      save_install_info
+      log "域名已保存: ${DOMAIN}"
       ;;
     0) return 0 ;;
     *) err "无效选项"; tls_main_menu; return ;;
@@ -344,14 +410,22 @@ tls_main_menu() {
 }
 
 prompt_tls_settings() {
-  if [[ -n "${TLS_MODE:-}" ]]; then
+  if is_tls_deferred; then
+    log "证书: $(tls_mode_label)（安装完成后在主菜单 [4] 配置）"
+    return 0
+  fi
+
+  if [[ -n "${TLS_MODE:-}" && "${TLS_MODE}" != "letsencrypt-auto" ]]; then
     log "证书模式: $(tls_mode_label)"
     return 0
   fi
 
   if [[ "${ASSUME_YES:-0}" == "1" ]]; then
     TLS_MODE="${TLS_MODE:-letsencrypt-auto}"
-    [[ "${TLS_MODE}" != "http" ]] || { SKIP_CERT=1; REQUIRE_HTTPS=false; }
+    [[ "${TLS_MODE}" != "http" && "${TLS_MODE}" != "deferred" ]] || {
+      [[ "${TLS_MODE}" == "deferred" ]] && SKIP_CERT=1
+      REQUIRE_HTTPS=false
+    }
     if [[ "${TLS_MODE}" == "letsencrypt-manual" && -z "${SSL_CERT_DIR}" ]]; then
       die "非交互手动模式需指定 --cert-dir=/path/to/certs"
     fi
@@ -360,16 +434,18 @@ prompt_tls_settings() {
   fi
 
   echo ""
-  echo "HTTPS / TLS 证书:"
+  echo "HTTPS / TLS 证书（也可安装后在主菜单 [4] 再配置）:"
   echo "  [1] 自动申请 Let's Encrypt（推荐，证书在 /etc/letsencrypt/live/域名/）"
   echo "  [2] 指定证书目录（自行准备 fullchain.pem + privkey.pem）"
   echo "  [3] 仅 HTTP / 跳过 HTTPS"
-  read -r -p "请选择 [1-3] [1]: " tsel
+  echo "  [4] 稍后配置（与「暂不填域名」相同，安装后通过菜单 [4] 设置）"
+  read -r -p "请选择 [1-4] [1]: " tsel
   tsel="${tsel:-1}"
   case "${tsel}" in
     1) TLS_MODE=letsencrypt-auto ;;
     2) TLS_MODE=letsencrypt-manual ;;
     3) TLS_MODE=http; SKIP_CERT=1; REQUIRE_HTTPS=false ;;
+    4) TLS_MODE=deferred; SKIP_CERT=1; REQUIRE_HTTPS=false ;;
     *) die "无效选项" ;;
   esac
   log "已选: $(tls_mode_label)"
