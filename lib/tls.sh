@@ -8,6 +8,7 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/common.sh"
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/nginx.sh"
 
 TLS_MODE="${TLS_MODE:-}"          # letsencrypt-auto | letsencrypt-manual | http
+SSL_CERT_DIR="${SSL_CERT_DIR:-}"  # 手动模式：证书目录（操作者自备文件）
 SSL_CERT_PATH="${SSL_CERT_PATH:-}"
 SSL_KEY_PATH="${SSL_KEY_PATH:-}"
 
@@ -15,18 +16,70 @@ is_ip_address() {
   [[ "${1:-}" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]
 }
 
-default_ssl_cert_path() {
-  echo "/etc/nginx/ssl/${DOMAIN}/fullchain.pem"
+default_ssl_cert_dir() {
+  echo "/etc/nginx/ssl/${DOMAIN}"
 }
 
-default_ssl_key_path() {
-  echo "/etc/nginx/ssl/${DOMAIN}/privkey.pem"
+ssl_cert_dir_help() {
+  cat <<'EOF'
+  请在所选目录中自行放置证书文件（文件名需一致）：
+    fullchain.pem  — 站点证书 + 中间证书（推荐）
+      或 cert.pem  — 仅站点证书（无中间链时）
+    privkey.pem    — 私钥（必填）
+  也可直接使用 Certbot 目录，例如：
+    /etc/letsencrypt/live/你的域名/
+EOF
+}
+
+# 根据目录解析 Nginx 使用的证书/私钥路径（写入 SSL_CERT_PATH / SSL_KEY_PATH）
+resolve_ssl_paths_from_dir() {
+  local dir="${SSL_CERT_DIR:-}"
+  dir="${dir%/}"
+  [[ -n "${dir}" && -d "${dir}" ]] || return 1
+
+  SSL_CERT_DIR="${dir}"
+  SSL_CERT_PATH=""
+  SSL_KEY_PATH=""
+
+  local f
+  for f in privkey.pem private.key key.pem; do
+    if [[ -f "${dir}/${f}" ]]; then
+      SSL_KEY_PATH="${dir}/${f}"
+      break
+    fi
+  done
+
+  for f in fullchain.pem cert.pem certificate.pem; do
+    if [[ -f "${dir}/${f}" ]]; then
+      SSL_CERT_PATH="${dir}/${f}"
+      break
+    fi
+  done
+
+  [[ -n "${SSL_CERT_PATH}" && -n "${SSL_KEY_PATH}" ]]
+}
+
+validate_cert_dir() {
+  if resolve_ssl_paths_from_dir; then
+    log "证书目录: ${SSL_CERT_DIR}"
+    log "  证书: ${SSL_CERT_PATH}"
+    log "  私钥: ${SSL_KEY_PATH}"
+    return 0
+  fi
+  return 1
+}
+
+is_le_live_cert_dir() {
+  local dir le
+  dir="$(readlink -f "${SSL_CERT_DIR}" 2>/dev/null || echo "${SSL_CERT_DIR}")"
+  le="$(readlink -f "/etc/letsencrypt/live/${DOMAIN}" 2>/dev/null || true)"
+  [[ -n "${le}" && "${dir}" == "${le}" ]]
 }
 
 tls_mode_label() {
   case "${TLS_MODE:-}" in
     letsencrypt-auto) echo "Let's Encrypt 自动申请 + 自动续签" ;;
-    letsencrypt-manual) echo "自定义证书路径 + Certbot 自动续签同步" ;;
+    letsencrypt-manual) echo "自定义证书目录（自备证书文件）" ;;
     http) echo "仅 HTTP（无 TLS）" ;;
     *) echo "未设置" ;;
   esac
@@ -43,21 +96,26 @@ prompt_tls_email_and_domain() {
     REQUIRE_HTTPS=false
     return 0
   fi
-  prompt ADMIN_EMAIL "Certbot 邮箱 (到期提醒)" "${ADMIN_EMAIL:-}"
-  [[ -n "${ADMIN_EMAIL}" ]] || die "申请/续签 Let's Encrypt 必须填写邮箱"
+  if [[ "${TLS_MODE:-}" == "letsencrypt-auto" ]]; then
+    prompt ADMIN_EMAIL "Certbot 邮箱 (到期提醒)" "${ADMIN_EMAIL:-}"
+    [[ -n "${ADMIN_EMAIL}" ]] || die "申请/续签 Let's Encrypt 必须填写邮箱"
+  fi
 }
 
-prompt_manual_cert_paths() {
-  local def_cert def_key
-  def_cert="$(default_ssl_cert_path)"
-  def_key="$(default_ssl_key_path)"
-  prompt SSL_CERT_PATH "证书完整链路径 (fullchain.pem)" "${SSL_CERT_PATH:-$def_cert}"
-  prompt SSL_KEY_PATH "私钥路径 (privkey.pem)" "${SSL_KEY_PATH:-$def_key}"
-}
+prompt_manual_cert_dir() {
+  echo ""
+  ssl_cert_dir_help
+  echo ""
+  local def_dir
+  def_dir="$(default_ssl_cert_dir)"
+  if [[ -d "/etc/letsencrypt/live/${DOMAIN}" ]]; then
+    def_dir="/etc/letsencrypt/live/${DOMAIN}"
+  fi
+  prompt SSL_CERT_DIR "证书目录（请提前放好 fullchain.pem 与 privkey.pem）" "${SSL_CERT_DIR:-$def_dir}"
 
-validate_cert_files() {
-  [[ -f "${SSL_CERT_PATH}" && -f "${SSL_KEY_PATH}" ]] || return 1
-  return 0
+  if ! validate_cert_dir; then
+    die "目录 ${SSL_CERT_DIR} 中未找到有效证书文件，请按上方说明放置 fullchain.pem（或 cert.pem）和 privkey.pem"
+  fi
 }
 
 ensure_certbot_webroot() {
@@ -84,24 +142,28 @@ setup_certbot_auto_renew() {
   fi
 }
 
-sync_le_certs_to_manual_paths() {
+sync_le_certs_to_dir() {
   local le_dir="/etc/letsencrypt/live/${DOMAIN}"
   [[ -f "${le_dir}/fullchain.pem" && -f "${le_dir}/privkey.pem" ]] \
     || die "未找到 Let's Encrypt 证书目录: ${le_dir}"
 
-  mkdir -p "$(dirname "${SSL_CERT_PATH}")" "$(dirname "${SSL_KEY_PATH}")"
-  install -m 0644 "${le_dir}/fullchain.pem" "${SSL_CERT_PATH}"
-  install -m 0600 "${le_dir}/privkey.pem" "${SSL_KEY_PATH}"
-  log "证书已同步到: ${SSL_CERT_PATH}"
+  mkdir -p "${SSL_CERT_DIR}"
+  install -m 0644 "${le_dir}/fullchain.pem" "${SSL_CERT_DIR}/fullchain.pem"
+  install -m 0600 "${le_dir}/privkey.pem" "${SSL_CERT_DIR}/privkey.pem"
+  SSL_CERT_PATH="${SSL_CERT_DIR}/fullchain.pem"
+  SSL_KEY_PATH="${SSL_CERT_DIR}/privkey.pem"
+  log "Let's Encrypt 证书已同步到目录: ${SSL_CERT_DIR}"
 }
 
 obtain_le_certificate() {
+  [[ -n "${ADMIN_EMAIL:-}" ]] || die "手动目录模式若需自动申请证书，请先配置 ADMIN_EMAIL"
   local staging_arg=()
   if [[ "${CERTBOT_STAGING:-0}" == "1" ]]; then
     staging_arg=(--staging)
   fi
 
   log "向 Let's Encrypt 申请证书 (${DOMAIN})..."
+  install_nginx_site
   if certbot certonly --nginx -d "${DOMAIN}" --email "${ADMIN_EMAIL}" \
     --agree-tos --non-interactive "${staging_arg[@]}"; then
     return 0
@@ -113,13 +175,13 @@ obtain_le_certificate() {
 }
 
 install_nginx_https_site() {
-  log "配置 Nginx HTTPS（自定义证书路径）..."
+  resolve_ssl_paths_from_dir || die "无法解析证书目录 ${SSL_CERT_DIR}"
+  log "配置 Nginx HTTPS..."
   render_template "${SCRIPT_DIR}/templates/nginx-https.conf.tpl" "/etc/nginx/conf.d/clashfeng.conf"
   nginx -t
   systemctl reload nginx
 }
 
-# --- 模式 1：Certbot 自动配置 Nginx + 自动续签 ---
 apply_tls_letsencrypt_auto() {
   REQUIRE_HTTPS=true
   SKIP_CERT=0
@@ -140,33 +202,35 @@ apply_tls_letsencrypt_auto() {
   fi
 
   setup_certbot_auto_renew "systemctl reload nginx"
-  log "HTTPS 已启用（Let's Encrypt 自动续签）"
+  log "HTTPS 已启用（Let's Encrypt 自动续签，证书在 /etc/letsencrypt/live/${DOMAIN}/）"
 }
 
-# --- 模式 2：用户指定证书路径，Certbot 续签后同步 ---
-apply_tls_letsencrypt_manual_paths() {
+apply_tls_letsencrypt_manual_dir() {
   REQUIRE_HTTPS=true
   SKIP_CERT=0
-  [[ -n "${SSL_CERT_PATH}" && -n "${SSL_KEY_PATH}" ]] || prompt_manual_cert_paths
-  check_dns || true
+  [[ -n "${SSL_CERT_DIR}" ]] || prompt_manual_cert_dir
 
-  install_nginx_site
-  if ! validate_cert_files; then
-    obtain_le_certificate
-    sync_le_certs_to_manual_paths
-  else
-    log "使用已有证书文件: ${SSL_CERT_PATH}"
-    # 仍尝试续签/更新 LE 账户（已有证书可能是手动放置的）
-    if [[ ! -d "/etc/letsencrypt/live/${DOMAIN}" ]]; then
-      obtain_le_certificate || warn "Let's Encrypt 首次申请失败，继续使用现有证书文件"
-      sync_le_certs_to_manual_paths 2>/dev/null || true
+  if ! validate_cert_dir; then
+    if prompt_yn "目录中尚无证书，是否用 Let's Encrypt 申请并写入该目录?" "n"; then
+      prompt ADMIN_EMAIL "Certbot 邮箱" "${ADMIN_EMAIL:-}"
+      check_dns || true
+      obtain_le_certificate
+      sync_le_certs_to_dir
+    else
+      die "请先在 ${SSL_CERT_DIR} 放置证书文件后再执行"
     fi
   fi
 
   install_nginx_https_site
-  install_cert_renew_deploy_hook
-  setup_certbot_auto_renew "${INSTALL_DIR}/scripts/cert-renew-deploy.sh"
-  log "HTTPS 已启用（续签后自动同步到自定义路径）"
+
+  if is_le_live_cert_dir; then
+    setup_certbot_auto_renew "systemctl reload nginx"
+    log "使用 Let's Encrypt 目录，续签后 Certbot 会自动更新该目录内文件"
+  else
+    install_cert_renew_deploy_hook
+    setup_certbot_auto_renew "${INSTALL_DIR}/scripts/cert-renew-deploy.sh"
+    log "HTTPS 已启用；Let's Encrypt 续签后将同步到 ${SSL_CERT_DIR}/fullchain.pem 与 privkey.pem"
+  fi
 }
 
 apply_tls_http_only() {
@@ -190,7 +254,7 @@ apply_tls_configuration() {
 
   case "${TLS_MODE:-letsencrypt-auto}" in
     letsencrypt-auto) apply_tls_letsencrypt_auto ;;
-    letsencrypt-manual) apply_tls_letsencrypt_manual_paths ;;
+    letsencrypt-manual) apply_tls_letsencrypt_manual_dir ;;
     http) apply_tls_http_only ;;
     *)
       warn "未知 TLS_MODE=${TLS_MODE}，使用自动模式"
@@ -205,11 +269,15 @@ tls_renew_now() {
   need_root
   case "${TLS_MODE:-letsencrypt-auto}" in
     letsencrypt-manual)
-      local hook="${INSTALL_DIR}/scripts/cert-renew-deploy.sh"
-      if [[ -x "${hook}" ]]; then
-        certbot renew --deploy-hook "${hook}"
+      if is_le_live_cert_dir; then
+        certbot renew --quiet --deploy-hook 'systemctl reload nginx'
       else
-        certbot renew --deploy-hook "systemctl reload nginx"
+        local hook="${INSTALL_DIR}/scripts/cert-renew-deploy.sh"
+        if [[ -x "${hook}" ]]; then
+          certbot renew --deploy-hook "${hook}"
+        else
+          certbot renew --deploy-hook "systemctl reload nginx"
+        fi
       fi
       ;;
     *)
@@ -219,7 +287,6 @@ tls_renew_now() {
   log "证书续签检查完成"
 }
 
-# 主菜单：HTTPS / TLS 证书
 tls_main_menu() {
   load_install_info 2>/dev/null || true
 
@@ -227,10 +294,10 @@ tls_main_menu() {
   echo -e "${CYAN}════════════ HTTPS / TLS 证书 ════════════${NC}"
   echo "  当前模式: $(tls_mode_label)"
   [[ -n "${DOMAIN:-}" ]] && echo "  域名:     ${DOMAIN}"
-  [[ -n "${SSL_CERT_PATH:-}" ]] && echo "  证书:     ${SSL_CERT_PATH}"
+  [[ -n "${SSL_CERT_DIR:-}" ]] && echo "  证书目录: ${SSL_CERT_DIR}"
   echo ""
-  echo "  [1] 自动申请 Let's Encrypt（Certbot 自动配置 Nginx + 自动续签）"
-  echo "  [2] 手动指定证书路径（Certbot 续签后自动同步到该路径）"
+  echo "  [1] 自动申请 Let's Encrypt（Certbot 管理，目录 /etc/letsencrypt/live/域名/）"
+  echo "  [2] 使用自定义证书目录（自备 fullchain.pem + privkey.pem）"
   echo "  [3] 仅 HTTP / 跳过 HTTPS"
   echo "  [4] 立即应用当前证书配置（已安装服务时）"
   echo "  [5] 手动触发证书续签检查"
@@ -247,8 +314,8 @@ tls_main_menu() {
       ;;
     2)
       TLS_MODE=letsencrypt-manual
-      prompt_tls_email_and_domain
-      prompt_manual_cert_paths
+      prompt DOMAIN "域名" "${DOMAIN:-}"
+      prompt_manual_cert_dir
       save_install_info
       log "已保存: $(tls_mode_label)"
       ;;
@@ -276,7 +343,6 @@ tls_main_menu() {
   esac
 }
 
-# 安装流程中：选择 TLS（若主菜单 [4] 未预设）
 prompt_tls_settings() {
   if [[ -n "${TLS_MODE:-}" ]]; then
     log "证书模式: $(tls_mode_label)"
@@ -286,14 +352,17 @@ prompt_tls_settings() {
   if [[ "${ASSUME_YES:-0}" == "1" ]]; then
     TLS_MODE="${TLS_MODE:-letsencrypt-auto}"
     [[ "${TLS_MODE}" != "http" ]] || { SKIP_CERT=1; REQUIRE_HTTPS=false; }
+    if [[ "${TLS_MODE}" == "letsencrypt-manual" && -z "${SSL_CERT_DIR}" ]]; then
+      die "非交互手动模式需指定 --cert-dir=/path/to/certs"
+    fi
     log "已选: $(tls_mode_label)"
     return 0
   fi
 
   echo ""
   echo "HTTPS / TLS 证书:"
-  echo "  [1] 自动申请 Let's Encrypt（推荐）"
-  echo "  [2] 手动指定证书公钥/私钥路径（续签后自动同步）"
+  echo "  [1] 自动申请 Let's Encrypt（推荐，证书在 /etc/letsencrypt/live/域名/）"
+  echo "  [2] 指定证书目录（自行准备 fullchain.pem + privkey.pem）"
   echo "  [3] 仅 HTTP / 跳过 HTTPS"
   read -r -p "请选择 [1-3] [1]: " tsel
   tsel="${tsel:-1}"

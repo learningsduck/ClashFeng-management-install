@@ -306,7 +306,8 @@ parse_args() {
       --skip-dns-check) SKIP_DNS_CHECK=1; shift ;;
       --skip-cert) SKIP_CERT=1; TLS_MODE=http; REQUIRE_HTTPS=false; shift ;;
       --tls=*) TLS_MODE="${1#*=}"; shift ;;
-      --cert-fullchain=*) SSL_CERT_PATH="${1#*=}"; TLS_MODE=letsencrypt-manual; shift ;;
+      --cert-dir=*) SSL_CERT_DIR="${1#*=}"; TLS_MODE=letsencrypt-manual; shift ;;
+      --cert-fullchain=*) SSL_CERT_DIR="$(dirname "${1#*=}")"; SSL_CERT_PATH="${1#*=}"; TLS_MODE=letsencrypt-manual; shift ;;
       --cert-key=*) SSL_KEY_PATH="${1#*=}"; TLS_MODE=letsencrypt-manual; shift ;;
       -y|--yes) ASSUME_YES=1; shift ;;
       -h|--help)
@@ -319,7 +320,7 @@ parse_args() {
         echo "  --domain= --email= --dir=  非交互安装 (需配合 -y)"
         echo "  --skip-dns-check  跳过 DNS 与公网 IP 校验"
         echo "  --skip-cert       仅 HTTP（无 Let's Encrypt）"
-        echo "  --tls=auto|manual|http  证书模式（manual 需配合 --cert-fullchain= --cert-key=）"
+        echo "  --tls=auto|manual|http  证书模式（manual 需配合 --cert-dir=/path/to/certs）"
         exit 0
         ;;
       *) die "未知参数: $1" ;;

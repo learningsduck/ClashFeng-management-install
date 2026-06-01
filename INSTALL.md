@@ -35,15 +35,15 @@
 | 选项 | 说明 |
 |------|------|
 | [1] 自动 Let's Encrypt | Certbot 自动配置 Nginx + 自动续签（推荐） |
-| [2] 自定义证书路径 | 指定 fullchain/privkey 路径；Certbot 续签后自动同步到该路径 |
+| [2] 自定义证书目录 | 选择文件夹并自备 `fullchain.pem`、`privkey.pem`（可直接用 `/etc/letsencrypt/live/域名/`） |
 | [3] 仅 HTTP | 不申请证书（如内网或 IP 访问） |
 
 非交互示例：
 
 ```bash
 sudo ./install.sh --role=all-in-one --domain=example.com --email=you@example.com --tls=auto -y
-sudo ./install.sh --role=all-in-one --domain=example.com --email=you@example.com \
-  --tls=manual --cert-fullchain=/path/fullchain.pem --cert-key=/path/privkey.pem -y
+sudo ./install.sh --role=all-in-one --domain=example.com \
+  --tls=manual --cert-dir=/etc/letsencrypt/live/example.com -y
 ```
 
 ## 4. 安装后

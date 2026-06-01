@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Certbot renew deploy-hook：将证书同步到自定义路径并重载 Nginx
+# Certbot renew deploy-hook：将证书同步到自定义目录并重载 Nginx
 set -euo pipefail
 DOMAIN="{{DOMAIN}}"
 LE_DIR="/etc/letsencrypt/live/${DOMAIN}"
-DEST_CERT="{{SSL_CERT_PATH}}"
-DEST_KEY="{{SSL_KEY_PATH}}"
+DEST_DIR="{{SSL_CERT_DIR}}"
 
 [[ -f "${LE_DIR}/fullchain.pem" && -f "${LE_DIR}/privkey.pem" ]] || exit 0
+[[ -n "${DEST_DIR}" ]] || exit 0
 
-mkdir -p "$(dirname "${DEST_CERT}")" "$(dirname "${DEST_KEY}")"
-install -m 0644 "${LE_DIR}/fullchain.pem" "${DEST_CERT}"
-install -m 0600 "${LE_DIR}/privkey.pem" "${DEST_KEY}"
+mkdir -p "${DEST_DIR}"
+install -m 0644 "${LE_DIR}/fullchain.pem" "${DEST_DIR}/fullchain.pem"
+install -m 0600 "${LE_DIR}/privkey.pem" "${DEST_DIR}/privkey.pem"
 systemctl reload nginx
