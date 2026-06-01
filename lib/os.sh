@@ -101,6 +101,9 @@ install_nginx_certbot() {
       yum install -y certbot
     }
   else
+    if ! rpm -q epel-release &>/dev/null; then
+      dnf install -y epel-release
+    fi
     dnf install -y nginx certbot python3-certbot-nginx
   fi
   systemctl enable nginx

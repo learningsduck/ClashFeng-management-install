@@ -14,7 +14,11 @@ health_check() {
     docker compose ps || true
   fi
 
-  if curl -sf "http://127.0.0.1:${APP_PORT:-3001}/auth/captcha" >/dev/null; then
+  local curl_opts=()
+  if [[ "${REQUIRE_HTTPS:-false}" == "true" ]]; then
+    curl_opts=(-H "X-Forwarded-Proto: https")
+  fi
+  if curl -sf "${curl_opts[@]}" "http://127.0.0.1:${APP_PORT:-3001}/auth/captcha" >/dev/null; then
     echo -e "${GREEN}OK${NC} 本地 API http://127.0.0.1:${APP_PORT:-3001}/auth/captcha"
   else
     echo -e "${RED}FAIL${NC} 本地 API"

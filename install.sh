@@ -69,10 +69,23 @@ maintenance_menu() {
   esac
 }
 
+is_ip_address() {
+  [[ "${1:-}" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]
+}
+
 prompt_domain_cert() {
   prompt DOMAIN "域名 (管理后台与 API 同域)" "${DOMAIN:-}"
-  prompt ADMIN_EMAIL "Certbot 邮箱" "${ADMIN_EMAIL:-}"
-  if prompt_yn "检查 DNS 是否指向本机公网 IP?" "Y"; then
+  if is_ip_address "${DOMAIN}"; then
+    warn "使用 IP 作为访问地址，将跳过 Let's Encrypt（仅 HTTP）"
+    SKIP_CERT=1
+    REQUIRE_HTTPS=false
+    ADMIN_EMAIL="${ADMIN_EMAIL:-admin@local}"
+  else
+    prompt ADMIN_EMAIL "Certbot 邮箱" "${ADMIN_EMAIL:-}"
+  fi
+  if [[ "${SKIP_DNS_CHECK:-0}" == "1" ]]; then
+    :
+  elif prompt_yn "检查 DNS 是否指向本机公网 IP?" "Y"; then
     SKIP_DNS_CHECK=0
   else
     SKIP_DNS_CHECK=1
@@ -84,8 +97,9 @@ prompt_security() {
   COMPOSE_DIR="${INSTALL_DIR}/compose"
   APP_DIR="${INSTALL_DIR}/app"
   prompt ADMIN_IP_WHITELIST "管理后台 IP 白名单 (可选, 逗号分隔)" "${ADMIN_IP_WHITELIST:-}"
-  REQUIRE_HTTPS=true
-  if prompt_yn "生产环境强制 HTTPS (REQUIRE_HTTPS)?" "Y"; then
+  if [[ "${SKIP_CERT:-0}" == "1" ]]; then
+    REQUIRE_HTTPS=false
+  elif prompt_yn "生产环境强制 HTTPS (REQUIRE_HTTPS)?" "Y"; then
     REQUIRE_HTTPS=true
   else
     REQUIRE_HTTPS=false
@@ -150,7 +164,11 @@ run_all_in_one() {
 
   install_nginx_certbot
   install_nginx_site
-  run_certbot || warn "证书申请未成功，可稍后手动 certbot --nginx -d ${DOMAIN}"
+  if [[ "${SKIP_CERT:-0}" == "1" ]]; then
+    warn "已跳过 HTTPS 证书（HTTP: http://${DOMAIN}/）"
+  else
+    run_certbot || warn "证书申请未成功，可稍后手动 certbot --nginx -d ${DOMAIN}"
+  fi
 
   show_done
 }
@@ -268,6 +286,8 @@ parse_args() {
       --domain=*) DOMAIN="${1#*=}"; shift ;;
       --email=*) ADMIN_EMAIL="${1#*=}"; shift ;;
       --dir=*) INSTALL_DIR="${1#*=}"; COMPOSE_DIR="${INSTALL_DIR}/compose"; APP_DIR="${INSTALL_DIR}/app"; shift ;;
+      --skip-dns-check) SKIP_DNS_CHECK=1; shift ;;
+      --skip-cert) SKIP_CERT=1; REQUIRE_HTTPS=false; shift ;;
       -y|--yes) ASSUME_YES=1; shift ;;
       -h|--help)
         echo "用法: sudo ./install.sh [选项]"
@@ -277,6 +297,8 @@ parse_args() {
         echo "  --uninstall       卸载 (可加 --purge-data --purge-all --remove-cert -y)"
         echo "  --role=all-in-one|api-standby|db-only"
         echo "  --domain= --email= --dir=  非交互安装 (需配合 -y)"
+        echo "  --skip-dns-check  跳过 DNS 与公网 IP 校验"
+        echo "  --skip-cert       仅 HTTP（无 Let's Encrypt）"
         exit 0
         ;;
       *) die "未知参数: $1" ;;

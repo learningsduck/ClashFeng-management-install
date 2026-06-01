@@ -72,6 +72,14 @@ prompt() {
   local message="$2"
   local default="${3:-}"
   local value
+  if [[ "${ASSUME_YES:-0}" == "1" ]]; then
+    value="${!var_name:-$default}"
+    if [[ -z "${value}" && "${message}" != *可选* ]]; then
+      die "非交互安装缺少参数: ${var_name}（例如 --domain=）"
+    fi
+    printf -v "${var_name}" '%s' "${value}"
+    return 0
+  fi
   if [[ -n "${default}" ]]; then
     read -r -p "${message} [${default}]: " value
     value="${value:-$default}"
@@ -85,6 +93,10 @@ prompt_yn() {
   local message="$1"
   local default="${2:-Y}"
   local hint value
+  if [[ "${ASSUME_YES:-0}" == "1" ]]; then
+    [[ "${default}" =~ ^[Yy] ]]
+    return $?
+  fi
   if [[ "${default}" =~ ^[Yy] ]]; then
     hint="Y/n"
     default="Y"

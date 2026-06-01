@@ -69,8 +69,13 @@ write_compose_file() {
 }
 
 ensure_node() {
-  if command -v node &>/dev/null; then
+  if [[ -x /usr/bin/node && -x /usr/bin/npm ]]; then
     return 0
+  fi
+  if command -v node &>/dev/null && command -v npm &>/dev/null; then
+    if node -e "process.exit(0)" &>/dev/null && npm --version &>/dev/null; then
+      return 0
+    fi
   fi
   log "安装 Node.js（宿主机运行 API）..."
   if [[ "${OS_MAJOR:-8}" == "7" ]]; then
@@ -87,7 +92,9 @@ build_app() {
   log "编译 ClashFeng-auth（npm ci + build）..."
   (
     cd "${APP_DIR}"
-    npm ci
+    export PATH="/usr/bin:/usr/local/bin:${PATH}"
+    # 构建需要 devDependencies（typescript）；勿继承 production 的 NODE_ENV
+    NODE_ENV=development npm ci
     npm run build
   )
   log "编译完成"
@@ -106,11 +113,12 @@ run_db_init() {
   sed -i "s/^MYSQL_HOST=.*/MYSQL_HOST=${init_host}/" "${APP_DIR}/.env"
 
   log "执行 init-mysql.mjs ..."
-  if ! (cd "${APP_DIR}" && node scripts/init-mysql.mjs); then
+  if ! (cd "${APP_DIR}" && export PATH="/usr/bin:/usr/local/bin:${PATH}" && /usr/bin/node scripts/init-mysql.mjs); then
     warn "业务用户建表失败，尝试使用 root 账户初始化..."
     (
       cd "${APP_DIR}"
-      MYSQL_USER=root MYSQL_PASSWORD="${MYSQL_ROOT_PASSWORD}" node scripts/init-mysql.mjs
+      export PATH="/usr/bin:/usr/local/bin:${PATH}"
+      MYSQL_USER=root MYSQL_PASSWORD="${MYSQL_ROOT_PASSWORD}" /usr/bin/node scripts/init-mysql.mjs
     )
     bootstrap_mysql_users
   fi
@@ -152,9 +160,13 @@ start_host_app_service() {
   install_systemd_service
 
   log "等待应用就绪..."
+  local curl_opts=()
+  if [[ "${REQUIRE_HTTPS:-false}" == "true" ]]; then
+    curl_opts=(-H "X-Forwarded-Proto: https")
+  fi
   local i
   for i in $(seq 1 40); do
-    if curl -sf "http://127.0.0.1:${APP_PORT}/auth/captcha" >/dev/null 2>&1; then
+    if curl -sf "${curl_opts[@]}" "http://127.0.0.1:${APP_PORT}/auth/captcha" >/dev/null 2>&1; then
       log "应用已响应 http://127.0.0.1:${APP_PORT}"
       systemctl --no-pager status clashfeng-auth | head -5 || true
       return 0
