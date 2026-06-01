@@ -20,6 +20,8 @@ source "${SCRIPT_DIR}/lib/health.sh"
 source "${SCRIPT_DIR}/lib/uninstall.sh"
 # shellcheck source=/dev/null
 source "${SCRIPT_DIR}/lib/tls.sh"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/lib/admin-mgmt.sh"
 
 banner() {
   echo -e "${CYAN}"
@@ -37,18 +39,20 @@ main_menu() {
   echo "  [2] API 备用节点 — 连接远程主库 (容灾)"
   echo "  [3] 仅数据库主库 — 无 Nginx / 无 App"
   echo "  [4] HTTPS / TLS 证书 (Let's Encrypt)"
-  echo "  [5] 维护工具"
-  echo "  [6] 一键卸载"
+  echo "  [5] 管理员账户管理"
+  echo "  [6] 维护工具"
+  echo "  [7] 一键卸载"
   echo "  [0] 退出"
   echo ""
-  read -r -p "请输入选项 [0-6]: " choice
+  read -r -p "请输入选项 [0-7]: " choice
   case "${choice}" in
     1) INSTALL_ROLE=all-in-one; run_all_in_one ;;
     2) INSTALL_ROLE=api-standby; run_api_standby ;;
     3) INSTALL_ROLE=db-only; run_db_only ;;
     4) tls_main_menu; main_menu ;;
-    5) maintenance_menu ;;
-    6) uninstall_menu; main_menu ;;
+    5) admin_management_menu; main_menu ;;
+    6) maintenance_menu ;;
+    7) uninstall_menu; main_menu ;;
     0) exit 0 ;;
     *) err "无效选项"; main_menu ;;
   esac
@@ -60,14 +64,16 @@ maintenance_menu() {
   echo "  [a] 健康检查"
   echo "  [b] 续签 Let's Encrypt 证书"
   echo "  [c] 查看 install-info (密钥已脱敏)"
-  echo "  [d] 一键卸载"
+  echo "  [d] 管理员账户管理"
+  echo "  [e] 一键卸载"
   echo "  [0] 返回"
   read -r -p "请选择: " m
   case "${m}" in
     a) health_check || true; main_menu ;;
     b) renew_cert; main_menu ;;
     c) show_install_info; main_menu ;;
-    d) uninstall_menu; main_menu ;;
+    d) admin_management_menu; main_menu ;;
+    e) uninstall_menu; main_menu ;;
     0) main_menu ;;
     *) maintenance_menu ;;
   esac
@@ -131,12 +137,18 @@ show_done() {
   save_install_info
   echo ""
   echo -e "${GREEN}════════════════ 安装完成 ════════════════${NC}"
-  echo "  管理后台: https://${DOMAIN}/"
-  echo "  API 示例: https://${DOMAIN}/auth/captcha"
+  if [[ "${TLS_MODE:-}" == "http" ]]; then
+    echo "  管理后台: http://${DOMAIN}/"
+    echo "  API 示例: http://${DOMAIN}/auth/captcha"
+  else
+    echo "  管理后台: https://${DOMAIN}/"
+    echo "  API 示例: https://${DOMAIN}/auth/captcha"
+  fi
   echo "  密钥文件: ${INSTALL_INFO}  (权限 600，请妥善保管)"
   echo ""
-  echo "  首次使用: 打开管理后台 → 初始化管理员"
-  echo "  初始化密钥 (ADMIN_INIT_SECRET) 见 install-info"
+  echo "  首次使用: 运行本脚本 [5] 创建管理员，再访问下方管理后台地址"
+  show_admin_panel_url
+  echo "  公网首页 https://${DOMAIN}/ 仅为中性门户，不暴露管理功能"
   echo ""
   if [[ "${INSTALL_ROLE}" == "all-in-one" ]]; then
     echo "  备用 VPS: 运行本脚本选 [2]，填写主库地址与相同 JWT_SECRET"

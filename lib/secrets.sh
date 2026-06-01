@@ -13,7 +13,17 @@ clear_stale_install_env() {
   unset MYSQL_ROOT_PASSWORD MYSQL_PASSWORD JWT_SECRET ADMIN_INIT_SECRET 2>/dev/null || true
 }
 
+generate_admin_panel_path() {
+  if [[ -z "${ADMIN_PANEL_PATH:-}" ]]; then
+    ADMIN_PANEL_PATH="/cp-$(openssl rand -hex 4)/"
+  fi
+  # 规范为 /xxx/ 形式
+  ADMIN_PANEL_PATH="/${ADMIN_PANEL_PATH#/}"
+  [[ "${ADMIN_PANEL_PATH}" == */ ]] || ADMIN_PANEL_PATH="${ADMIN_PANEL_PATH}/"
+}
+
 generate_secrets() {
+  generate_admin_panel_path
   if [[ -z "${JWT_SECRET:-}" ]]; then
     JWT_SECRET="$(rand_hex)"
   fi
