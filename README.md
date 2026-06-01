@@ -35,14 +35,15 @@ sudo ./install.sh --show-info
 ## 一键卸载
 
 ```bash
-sudo ./install.sh                    # 主菜单 [5] 或 维护 [d]
-sudo ./install.sh --uninstall -y     # 仅停容器 + 移除 Nginx 配置，保留数据卷与目录
-sudo ./install.sh --uninstall --purge-data -y    # 同时删除 MySQL 数据卷
-sudo ./install.sh --uninstall --purge-all --remove-cert -y   # 彻底删除（含目录与证书）
+sudo ./install.sh                    # 主菜单 [5] → 选 [1] 卸载并准备重装（推荐）
+sudo ./install.sh --uninstall --reinstall -y   # 非交互：清库+删目录，保留 HTTPS 证书
+sudo ./install.sh --uninstall -y     # 仅停服务（保留数据卷；重装可能密码冲突）
+sudo ./install.sh --uninstall --purge-all --remove-cert -y   # 彻底删除（含证书）
 ```
 
 | 选项 | 作用 |
 |------|------|
+| `--reinstall` | **推荐**：等同清数据卷 + 删除 `/opt/clashfeng`，保留 Let's Encrypt 证书 |
 | `--purge-data` | `docker compose down -v`，清空数据库 |
 | `--purge-all` | 删除 `/opt/clashfeng` 整个目录 |
 | `--purge-images` | 删除本机构建的 Docker 镜像 |

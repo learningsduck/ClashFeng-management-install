@@ -5,6 +5,8 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/common.sh"
 # shellcheck source=lib/mysql-bootstrap.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/mysql-bootstrap.sh"
+# shellcheck source=lib/cleanup.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/cleanup.sh"
 
 SYSTEMD_UNIT="/etc/systemd/system/clashfeng-auth.service"
 
@@ -14,7 +16,12 @@ clone_auth_repo() {
     log "更新 ClashFeng-auth..."
     git -C "${APP_DIR}" fetch origin
     git -C "${APP_DIR}" checkout "${AUTH_REPO_BRANCH}"
-    git -C "${APP_DIR}" pull --ff-only origin "${AUTH_REPO_BRANCH}" || warn "git pull 失败，使用本地代码继续"
+    if ! git -C "${APP_DIR}" pull --ff-only origin "${AUTH_REPO_BRANCH}"; then
+      warn "git pull 失败（常有本地修改），重置为 origin/${AUTH_REPO_BRANCH} ..."
+      git -C "${APP_DIR}" fetch origin
+      git -C "${APP_DIR}" reset --hard "origin/${AUTH_REPO_BRANCH}"
+      git -C "${APP_DIR}" clean -fd
+    fi
   else
     log "克隆 ${AUTH_REPO_URL} ..."
     git clone --depth 1 -b "${AUTH_REPO_BRANCH}" "${AUTH_REPO_URL}" "${APP_DIR}"
@@ -135,8 +142,24 @@ docker_compose_mysql_up() {
   log "启动 Docker MySQL..."
   cd "${COMPOSE_DIR}"
   docker compose up -d mysql
+  wait_mysql_container_up
+  ensure_mysql_volume_matches_config
+  docker compose up -d mysql 2>/dev/null || true
+  wait_mysql_container_up
   wait_mysql_healthy
   bootstrap_mysql_users
+}
+
+wait_mysql_container_up() {
+  cd "${COMPOSE_DIR}"
+  local i
+  for i in $(seq 1 30); do
+    if docker compose ps mysql 2>/dev/null | grep -qE 'running|Up'; then
+      return 0
+    fi
+    sleep 2
+  done
+  die "MySQL 容器未启动，请检查: docker compose -f ${COMPOSE_DIR}/docker-compose.yml logs mysql"
 }
 
 install_systemd_service() {

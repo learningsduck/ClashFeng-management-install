@@ -56,28 +56,30 @@ docker compose build app
 docker compose up -d
 ```
 
-## 6. 卸载
+## 6. 卸载与重装
 
-交互式：
+交互式（推荐）：
 
 ```bash
-sudo ./install.sh   # 选 [5] 或 [4] → [d]
+sudo ./install.sh   # 选 [5] → [1] 卸载并准备重装
 ```
 
 非交互：
 
 ```bash
-# 只停服务，保留数据库卷（可重装恢复）
+# 推荐：卸载后可直接再装，不会出现 MySQL 密码不一致
+sudo ./install.sh --uninstall --reinstall -y
+sudo ./install.sh   # 或带 --domain= --email= -y
+
+# 只停服务，保留数据库（升级用；勿用于「重装」）
 sudo ./install.sh --uninstall -y
 
-# 清空 MySQL 数据
-sudo ./install.sh --uninstall --purge-data -y
-
-# 完全移除（目录 + 数据卷 + 可选证书）
+# 完全移除（含证书）
 sudo ./install.sh --uninstall --purge-all --remove-cert -y
 ```
 
-卸载**不会**自动删除系统级的 Docker、Nginx、Certbot、Node.js。
+卸载**不会**删除系统级的 Docker、Nginx、Certbot、Node.js。  
+`--reinstall` 会清空 MySQL 数据卷、删除 `/opt/clashfeng`，并**保留** HTTPS 证书（同域名重装时无需重新申请）。
 
 ## 7. 故障排查
 

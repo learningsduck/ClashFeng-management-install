@@ -43,7 +43,7 @@ FLUSH PRIVILEGES;"
     log "MySQL 用户连接成功"
   else
     warn "业务用户验证失败。若曾重装且未删数据卷，请执行:"
-    warn "  sudo ./install.sh --uninstall --purge-data -y"
+    warn "  sudo ./install.sh --uninstall --reinstall -y"
     warn "然后重新安装，或手动用 root 修改 clashwin 密码与 install-info.env 一致"
   fi
 }

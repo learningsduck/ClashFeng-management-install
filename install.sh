@@ -271,6 +271,7 @@ parse_args() {
         shift
         while [[ $# -gt 0 ]]; do
           case "$1" in
+            --reinstall) PREPARE_REINSTALL=1; shift ;;
             --purge-data) PURGE_DATA=1; shift ;;
             --purge-all) PURGE_ALL=1; PURGE_DATA=1; shift ;;
             --purge-images) PURGE_IMAGES=1; shift ;;
@@ -294,7 +295,7 @@ parse_args() {
         echo "  --health          健康检查"
         echo "  --renew-cert      续签证书"
         echo "  --show-info       查看安装信息"
-        echo "  --uninstall       卸载 (可加 --purge-data --purge-all --remove-cert -y)"
+        echo "  --uninstall       卸载 (可加 --reinstall -y 准备重装; --purge-data --purge-all)"
         echo "  --role=all-in-one|api-standby|db-only"
         echo "  --domain= --email= --dir=  非交互安装 (需配合 -y)"
         echo "  --skip-dns-check  跳过 DNS 与公网 IP 校验"
