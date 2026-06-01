@@ -25,7 +25,7 @@ health_check() {
     ok=0
   fi
 
-  if [[ -n "${DOMAIN:-}" ]]; then
+  if [[ -n "${DOMAIN:-}" && "${TLS_MODE:-letsencrypt-auto}" != "http" ]]; then
     if curl -sfk "https://${DOMAIN}/auth/captcha" >/dev/null 2>&1 || curl -sf "https://${DOMAIN}/auth/captcha" >/dev/null 2>&1; then
       echo -e "${GREEN}OK${NC} HTTPS https://${DOMAIN}/auth/captcha"
     else
@@ -49,7 +49,7 @@ show_install_info() {
 }
 
 renew_cert() {
-  load_install_info
-  certbot renew --quiet --deploy-hook 'systemctl reload nginx'
-  log "证书续签完成"
+  # shellcheck source=lib/tls.sh
+  source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/tls.sh"
+  tls_renew_now
 }

@@ -26,7 +26,7 @@ sudo ./install.sh
 ## 维护命令
 
 ```bash
-sudo ./install.sh          # 交互菜单 → [4] 维护 / [5] 卸载
+sudo ./install.sh          # 交互菜单 → [4] HTTPS 证书 / [5] 维护 / [6] 卸载
 sudo ./install.sh --health
 sudo ./install.sh --renew-cert
 sudo ./install.sh --show-info

@@ -18,6 +18,8 @@ source "${SCRIPT_DIR}/lib/nginx.sh"
 source "${SCRIPT_DIR}/lib/health.sh"
 # shellcheck source=/dev/null
 source "${SCRIPT_DIR}/lib/uninstall.sh"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/lib/tls.sh"
 
 banner() {
   echo -e "${CYAN}"
@@ -34,17 +36,19 @@ main_menu() {
   echo "  [1] 主站一体 — MySQL 主库 + API + 管理后台 (推荐首台)"
   echo "  [2] API 备用节点 — 连接远程主库 (容灾)"
   echo "  [3] 仅数据库主库 — 无 Nginx / 无 App"
-  echo "  [4] 维护工具"
-  echo "  [5] 一键卸载"
+  echo "  [4] HTTPS / TLS 证书 (Let's Encrypt)"
+  echo "  [5] 维护工具"
+  echo "  [6] 一键卸载"
   echo "  [0] 退出"
   echo ""
-  read -r -p "请输入选项 [0-5]: " choice
+  read -r -p "请输入选项 [0-6]: " choice
   case "${choice}" in
     1) INSTALL_ROLE=all-in-one; run_all_in_one ;;
     2) INSTALL_ROLE=api-standby; run_api_standby ;;
     3) INSTALL_ROLE=db-only; run_db_only ;;
-    4) maintenance_menu ;;
-    5) uninstall_menu; main_menu ;;
+    4) tls_main_menu; main_menu ;;
+    5) maintenance_menu ;;
+    6) uninstall_menu; main_menu ;;
     0) exit 0 ;;
     *) err "无效选项"; main_menu ;;
   esac
@@ -77,11 +81,9 @@ prompt_domain_cert() {
   prompt DOMAIN "域名 (管理后台与 API 同域)" "${DOMAIN:-}"
   if is_ip_address "${DOMAIN}"; then
     warn "使用 IP 作为访问地址，将跳过 Let's Encrypt（仅 HTTP）"
+    TLS_MODE=http
     SKIP_CERT=1
     REQUIRE_HTTPS=false
-    ADMIN_EMAIL="${ADMIN_EMAIL:-admin@local}"
-  else
-    prompt ADMIN_EMAIL "Certbot 邮箱" "${ADMIN_EMAIL:-}"
   fi
   if [[ "${SKIP_DNS_CHECK:-0}" == "1" ]]; then
     :
@@ -110,10 +112,15 @@ confirm_install() {
   echo ""
   echo -e "${CYAN}══════════════ 安装摘要 ══════════════${NC}"
   echo "  角色:     ${INSTALL_ROLE}"
-  echo "  访问地址: https://${DOMAIN}/"
+  if [[ "${TLS_MODE:-}" == "http" || "${SKIP_CERT:-0}" == "1" ]]; then
+    echo "  访问地址: http://${DOMAIN}/"
+  else
+    echo "  访问地址: https://${DOMAIN}/"
+  fi
   echo "  安装目录: ${INSTALL_DIR}"
   echo "  MySQL:    ${MYSQL_HOST}:${MYSQL_PORT}/${MYSQL_DATABASE}"
-  echo "  Nginx:    宿主机 + Let's Encrypt 自动续签"
+  echo "  TLS:      $(tls_mode_label)"
+  echo "  Nginx:    宿主机反向代理"
   echo "  后端仓库: ${AUTH_REPO_URL} (${AUTH_REPO_BRANCH})"
   echo -e "${CYAN}══════════════════════════════════════${NC}"
   echo ""
@@ -141,6 +148,7 @@ show_done() {
 
 run_all_in_one() {
   prompt_domain_cert
+  prompt_tls_settings
   prompt_security
   MYSQL_HOST=127.0.0.1
   MYSQL_PORT=3306
@@ -164,12 +172,7 @@ run_all_in_one() {
   start_host_app_service
 
   install_nginx_certbot
-  install_nginx_site
-  if [[ "${SKIP_CERT:-0}" == "1" ]]; then
-    warn "已跳过 HTTPS 证书（HTTP: http://${DOMAIN}/）"
-  else
-    run_certbot || warn "证书申请未成功，可稍后手动 certbot --nginx -d ${DOMAIN}"
-  fi
+  apply_tls_configuration || warn "HTTPS 配置未完全成功，可稍后在主菜单 [4] 重试"
 
   show_done
 }
@@ -178,6 +181,7 @@ run_api_standby() {
   echo ""
   echo -e "${YELLOW}备用节点: JWT_SECRET 必须与主站完全相同${NC}"
   prompt_domain_cert
+  prompt_tls_settings
   prompt INSTALL_DIR "安装根目录" "${INSTALL_DIR}"
   COMPOSE_DIR="${INSTALL_DIR}/compose"
   APP_DIR="${INSTALL_DIR}/app"
@@ -210,8 +214,7 @@ run_api_standby() {
   start_host_app_service
 
   install_nginx_certbot
-  install_nginx_site
-  run_certbot || warn "证书申请未成功"
+  apply_tls_configuration || warn "HTTPS 配置未完全成功"
 
   show_done
 }
@@ -289,7 +292,10 @@ parse_args() {
       --email=*) ADMIN_EMAIL="${1#*=}"; shift ;;
       --dir=*) INSTALL_DIR="${1#*=}"; COMPOSE_DIR="${INSTALL_DIR}/compose"; APP_DIR="${INSTALL_DIR}/app"; shift ;;
       --skip-dns-check) SKIP_DNS_CHECK=1; shift ;;
-      --skip-cert) SKIP_CERT=1; REQUIRE_HTTPS=false; shift ;;
+      --skip-cert) SKIP_CERT=1; TLS_MODE=http; REQUIRE_HTTPS=false; shift ;;
+      --tls=*) TLS_MODE="${1#*=}"; shift ;;
+      --cert-fullchain=*) SSL_CERT_PATH="${1#*=}"; TLS_MODE=letsencrypt-manual; shift ;;
+      --cert-key=*) SSL_KEY_PATH="${1#*=}"; TLS_MODE=letsencrypt-manual; shift ;;
       -y|--yes) ASSUME_YES=1; shift ;;
       -h|--help)
         echo "用法: sudo ./install.sh [选项]"
@@ -301,6 +307,7 @@ parse_args() {
         echo "  --domain= --email= --dir=  非交互安装 (需配合 -y)"
         echo "  --skip-dns-check  跳过 DNS 与公网 IP 校验"
         echo "  --skip-cert       仅 HTTP（无 Let's Encrypt）"
+        echo "  --tls=auto|manual|http  证书模式（manual 需配合 --cert-fullchain= --cert-key=）"
         exit 0
         ;;
       *) die "未知参数: $1" ;;

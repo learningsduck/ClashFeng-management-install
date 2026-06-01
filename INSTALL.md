@@ -30,7 +30,23 @@
 - 只启动 Docker MySQL
 - 可配置允许备用 VPS IP 访问 3306
 
-## 3. 安装后
+## 3. HTTPS / TLS 证书（主菜单 [4]）
+
+| 选项 | 说明 |
+|------|------|
+| [1] 自动 Let's Encrypt | Certbot 自动配置 Nginx + 自动续签（推荐） |
+| [2] 自定义证书路径 | 指定 fullchain/privkey 路径；Certbot 续签后自动同步到该路径 |
+| [3] 仅 HTTP | 不申请证书（如内网或 IP 访问） |
+
+非交互示例：
+
+```bash
+sudo ./install.sh --role=all-in-one --domain=example.com --email=you@example.com --tls=auto -y
+sudo ./install.sh --role=all-in-one --domain=example.com --email=you@example.com \
+  --tls=manual --cert-fullchain=/path/fullchain.pem --cert-key=/path/privkey.pem -y
+```
+
+## 4. 安装后
 
 1. 浏览器打开 `https://域名/`
 2. 展开「初始化管理员」，填写 `ADMIN_INIT_SECRET`（见 `install-info.env`）
