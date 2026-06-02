@@ -336,6 +336,25 @@ tls_apply_saved_config() {
   # shellcheck source=lib/app.sh
   source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/app.sh"
   sync_require_https_to_app
+  log "HTTPS 配置已应用到 Nginx"
+}
+
+tls_https_active() {
+  ss -tlnp 2>/dev/null | grep -qE ':443[^0-9].*nginx|:443\s'
+}
+
+tls_offer_apply_after_save() {
+  echo ""
+  warn "仅保存配置不会启用 HTTPS；必须「应用」后 Nginx 才会监听 443"
+  if prompt_yn "是否立即应用当前证书配置?" "Y"; then
+    tls_apply_saved_config
+    health_check || true
+    # shellcheck source=lib/admin-mgmt.sh
+    source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/admin-mgmt.sh"
+    show_admin_panel_url
+  else
+    log "请稍后在本菜单选 [4] 立即应用"
+  fi
 }
 
 tls_main_menu() {
@@ -350,6 +369,13 @@ tls_main_menu() {
     echo "  域名:     （未设置，可先选 [6]）"
   fi
   [[ -n "${SSL_CERT_DIR:-}" ]] && echo "  证书目录: ${SSL_CERT_DIR}"
+  if tls_https_active; then
+    echo -e "  HTTPS:    ${GREEN}已启用${NC} (443)"
+  elif [[ "${TLS_MODE:-}" != "http" && "${TLS_MODE:-}" != "deferred" && -n "${SSL_CERT_DIR:-}" ]]; then
+    echo -e "  HTTPS:    ${YELLOW}未启用${NC} — 已保存证书路径，请选 [4] 应用"
+  else
+    echo -e "  HTTPS:    ${YELLOW}未启用${NC}"
+  fi
   echo ""
   echo "  [1] 自动申请 Let's Encrypt（Certbot 管理，目录 /etc/letsencrypt/live/域名/）"
   echo "  [2] 使用自定义证书目录（自备 fullchain.pem + privkey.pem）"
@@ -368,7 +394,8 @@ tls_main_menu() {
       ensure_domain_for_tls_apply
       prompt_tls_email_and_domain
       save_install_info
-      log "已保存: $(tls_mode_label)。请选 [4] 应用配置"
+      log "已保存: $(tls_mode_label)"
+      tls_offer_apply_after_save
       ;;
     2)
       TLS_MODE=letsencrypt-manual
@@ -376,7 +403,8 @@ tls_main_menu() {
       ensure_domain_for_tls_apply
       prompt_manual_cert_dir
       save_install_info
-      log "已保存: $(tls_mode_label)。请选 [4] 应用配置"
+      log "已保存: $(tls_mode_label)"
+      tls_offer_apply_after_save
       ;;
     3)
       TLS_MODE=http
@@ -386,11 +414,15 @@ tls_main_menu() {
         prompt DOMAIN "域名或 IP（可选，用于 Nginx server_name）" "${DOMAIN:-}"
       fi
       save_install_info
-      log "已保存: $(tls_mode_label)。请选 [4] 应用配置"
+      log "已保存: $(tls_mode_label)"
+      tls_offer_apply_after_save
       ;;
     4)
       tls_apply_saved_config
       health_check || true
+      # shellcheck source=lib/admin-mgmt.sh
+      source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/admin-mgmt.sh"
+      show_admin_panel_url
       ;;
     5)
       tls_renew_now
