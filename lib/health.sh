@@ -3,6 +3,8 @@ set -euo pipefail
 
 # shellcheck source=lib/common.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/common.sh"
+# shellcheck source=lib/standby.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/standby.sh"
 
 health_check() {
   load_install_info
@@ -23,6 +25,15 @@ health_check() {
   else
     echo -e "${RED}FAIL${NC} 本地 API"
     ok=0
+  fi
+
+  if [[ "${INSTALL_ROLE:-}" == "api-standby" && -n "${MYSQL_HOST:-}" ]]; then
+    if test_remote_mysql_connection; then
+      echo -e "${GREEN}OK${NC} 远程主库 ${MYSQL_HOST}:${MYSQL_PORT:-3306}"
+    else
+      echo -e "${RED}FAIL${NC} 远程主库 ${MYSQL_HOST}:${MYSQL_PORT:-3306}"
+      ok=0
+    fi
   fi
 
   if [[ -n "${DOMAIN:-}" && "${DOMAIN}" != "_" && "${TLS_MODE:-}" != "http" && "${TLS_MODE:-}" != "deferred" ]]; then

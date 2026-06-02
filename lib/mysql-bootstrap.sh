@@ -53,3 +53,28 @@ FLUSH PRIVILEGES;"
     warn "然后重新安装，或手动用 root 修改 clashwin 密码与 install-info.env 一致"
   fi
 }
+
+# 允许指定公网 IP 的备用 API 节点连接主库（CREATE USER 'user'@'ip'）
+grant_mysql_user_from_host() {
+  local remote_host="$1"
+  [[ -n "${remote_host}" ]] || return 1
+  [[ -f "${COMPOSE_DIR}/docker-compose.yml" ]] || return 1
+  grep -q "mysql:" "${COMPOSE_DIR}/docker-compose.yml" 2>/dev/null || return 1
+
+  cd "${COMPOSE_DIR}"
+  local root_pw="${MYSQL_ROOT_PASSWORD:-}"
+  if [[ -z "${root_pw}" && -f "${COMPOSE_DIR}/.env" ]]; then
+    root_pw="$(grep -m1 '^MYSQL_ROOT_PASSWORD=' "${COMPOSE_DIR}/.env" | cut -d= -f2- || true)"
+  fi
+  [[ -n "${root_pw}" ]] || die "缺少 MYSQL_ROOT_PASSWORD"
+
+  log "授权 ${MYSQL_USER}@${remote_host} 访问 ${MYSQL_DATABASE} ..."
+  local sql
+  sql="CREATE USER IF NOT EXISTS '${MYSQL_USER}'@'${remote_host}' IDENTIFIED BY '${MYSQL_PASSWORD}';
+ALTER USER '${MYSQL_USER}'@'${remote_host}' IDENTIFIED BY '${MYSQL_PASSWORD}';
+GRANT ALL PRIVILEGES ON \`${MYSQL_DATABASE}\`.* TO '${MYSQL_USER}'@'${remote_host}';
+FLUSH PRIVILEGES;"
+
+  docker compose exec -T mysql mysql -uroot -p"${root_pw}" --default-character-set=utf8mb4 -e "${sql}"
+  log "已授权备用节点 IP: ${remote_host}"
+}

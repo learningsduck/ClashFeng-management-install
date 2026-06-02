@@ -33,7 +33,7 @@ sudo ./install.sh -y --role=all-in-one --defer-tls --dir=/opt/clashfeng
 ## 维护命令
 
 ```bash
-sudo ./install.sh          # 交互菜单 → [4] HTTPS / [5] 管理员 / [8] 后台入口 / [7] 卸载
+sudo ./install.sh          # [4] HTTPS / [5] 管理员 / [8] 后台入口 / [9] 容灾 / [7] 卸载
 sudo ./install.sh --health
 sudo ./install.sh --renew-cert
 sudo ./install.sh --show-info
@@ -57,11 +57,13 @@ sudo ./install.sh --uninstall --purge-all --remove-cert -y   # 彻底删除（�
 | `--purge-images` | 删除本机构建的 Docker 镜像 |
 | `--remove-cert` | `certbot delete` 删除域名证书 |
 
-## 多 VPS 容灾
+## 多 VPS 容灾（域名/IP 被封时）
 
-1. **主 VPS**：选 `[1] 主站一体`
-2. **备用 VPS**：选 `[2] API 备用节点`，填写主库内网地址与**相同** `JWT_SECRET`
-3. 客户端主/备域名见 `endpoints.json.example`
+1. **旧 VPS（主库）**：`[9] 容灾与主库连接` → `[2]` 放行新 VPS IP + 云安全组 3306
+2. **新 VPS**：`[2] API 备用节点`，`MYSQL_HOST` 填主库**公网 IP**，`JWT_SECRET` 与主库一致
+3. **客户端**：`[9] → [4]` 导出 `endpoints.json`，或参考 `endpoints.json.example`
+
+详细步骤见 [DISASTER.md](./DISASTER.md)。
 
 ## 系统要求
 

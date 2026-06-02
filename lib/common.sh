@@ -69,6 +69,9 @@ SSL_CERT_PATH=${SSL_CERT_PATH:-}
 SSL_KEY_PATH=${SSL_KEY_PATH:-}
 ADMIN_PANEL_PATH=${ADMIN_PANEL_PATH:-}
 DISABLE_WEB_ADMIN_INIT=${DISABLE_WEB_ADMIN_INIT:-true}
+MYSQL_BIND=${MYSQL_BIND:-127.0.0.1:3306:3306}
+MASTER_PUBLIC_IP=${MASTER_PUBLIC_IP:-}
+ALLOWED_STANDBY_IPS=${ALLOWED_STANDBY_IPS:-}
 EOF
   chmod 600 "${INSTALL_INFO}"
 }
@@ -141,4 +144,8 @@ public_ip() {
 resolve_domain() {
   local domain="$1"
   getent ahosts "${domain}" 2>/dev/null | awk '{print $1; exit}'
+}
+
+is_ip_address() {
+  [[ "${1:-}" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]
 }

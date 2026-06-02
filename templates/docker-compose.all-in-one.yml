@@ -5,7 +5,7 @@ services:
     container_name: clashfeng-mysql
     restart: unless-stopped
     ports:
-      - "127.0.0.1:3306:3306"
+      - "${MYSQL_BIND:-127.0.0.1:3306:3306}"
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       MYSQL_DATABASE: ${MYSQL_DATABASE}

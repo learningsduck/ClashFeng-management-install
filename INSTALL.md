@@ -21,9 +21,12 @@
 ### [2] API 备用节点
 
 - 不安装本地 MySQL
-- `.env` 中 `MYSQL_HOST` 指向主库内网 IP
+- `.env` 中 `MYSQL_HOST` 指向主库**公网 IP**（跨 VPS 时）或内网 IP（同机房）
+- 安装前须在主库执行 **[9]→[2]** 放行本机 IP，并配置云安全组 3306
 - **JWT_SECRET、ADMIN_INIT_SECRET 必须与主站一致**
 - 使用**另一个域名**（建议）
+
+详见 [DISASTER.md](./DISASTER.md)。
 
 ### [3] 仅数据库主库
 

@@ -40,11 +40,18 @@ write_app_env() {
     db_host="127.0.0.1"
   fi
 
+  local mysql_bind_line=""
+  if [[ "${INSTALL_ROLE}" == "all-in-one" || "${INSTALL_ROLE}" == "db-only" ]]; then
+    MYSQL_BIND="${MYSQL_BIND:-127.0.0.1:3306:3306}"
+    mysql_bind_line="MYSQL_BIND=${MYSQL_BIND}"
+  fi
+
   cat > "${COMPOSE_DIR}/.env" <<EOF
 APP_DIR=${APP_DIR}
 PORT=${APP_PORT}
 NODE_ENV=${NODE_ENV}
 REQUIRE_HTTPS=${REQUIRE_HTTPS}
+${mysql_bind_line}
 
 JWT_SECRET=${JWT_SECRET}
 JWT_ACCESS_EXPIRES_IN=${JWT_ACCESS_EXPIRES_IN}

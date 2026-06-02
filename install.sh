@@ -22,6 +22,8 @@ source "${SCRIPT_DIR}/lib/uninstall.sh"
 source "${SCRIPT_DIR}/lib/tls.sh"
 # shellcheck source=/dev/null
 source "${SCRIPT_DIR}/lib/admin-mgmt.sh"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/lib/standby.sh"
 
 banner() {
   echo -e "${CYAN}"
@@ -43,9 +45,10 @@ main_menu() {
   echo "  [6] 维护工具"
   echo "  [7] 一键卸载"
   echo "  [8] 查询管理后台入口"
+  echo "  [9] 容灾与主库连接"
   echo "  [0] 退出"
   echo ""
-  read -r -p "请输入选项 [0-8]: " choice
+  read -r -p "请输入选项 [0-9]: " choice
   case "${choice}" in
     1) INSTALL_ROLE=all-in-one; run_all_in_one ;;
     2) INSTALL_ROLE=api-standby; run_api_standby ;;
@@ -55,6 +58,7 @@ main_menu() {
     6) maintenance_menu ;;
     7) uninstall_menu; main_menu ;;
     8) show_admin_panel_entry; main_menu ;;
+    9) standby_main_menu; main_menu ;;
     0) exit 0 ;;
     *) err "无效选项"; main_menu ;;
   esac
@@ -69,6 +73,7 @@ maintenance_menu() {
   echo "  [d] 管理员账户管理"
   echo "  [e] 一键卸载"
   echo "  [f] 查询管理后台入口"
+  echo "  [g] 容灾与主库连接"
   echo "  [0] 返回"
   read -r -p "请选择: " m
   case "${m}" in
@@ -78,13 +83,10 @@ maintenance_menu() {
     d) admin_management_menu; main_menu ;;
     e) uninstall_menu; main_menu ;;
     f) show_admin_panel_entry; main_menu ;;
+    g) standby_main_menu; main_menu ;;
     0) main_menu ;;
     *) maintenance_menu ;;
   esac
-}
-
-is_ip_address() {
-  [[ "${1:-}" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]
 }
 
 prompt_domain_cert() {
@@ -190,6 +192,9 @@ confirm_install() {
 }
 
 show_done() {
+  if [[ "${INSTALL_ROLE}" == "all-in-one" || "${INSTALL_ROLE}" == "db-only" ]]; then
+    MASTER_PUBLIC_IP="${MASTER_PUBLIC_IP:-$(public_ip)}"
+  fi
   save_install_info
   echo ""
   echo -e "${GREEN}════════════════ 安装完成 ════════════════${NC}"
@@ -213,8 +218,12 @@ show_done() {
   fi
   echo ""
   if [[ "${INSTALL_ROLE}" == "all-in-one" ]]; then
-    echo "  备用 VPS: 运行本脚本选 [2]，填写主库地址与相同 JWT_SECRET"
-    echo "  客户端线路示例: ${SCRIPT_DIR}/endpoints.json.example"
+    echo "  容灾备用: 主库先 [9]→[2] 放行备用 IP，备用 VPS 选 [2] 安装 API"
+    echo "  客户端 endpoints: 主菜单 [9]→[4] 导出"
+  fi
+  if [[ "${INSTALL_ROLE}" == "api-standby" ]]; then
+    echo "  容灾: 主菜单 [9]→[4] 导出客户端 endpoints.json"
+    export_client_endpoints 2>/dev/null || echo "  （配置 HTTPS/域名后执行 [9]→[4] 导出）"
   fi
   echo -e "${GREEN}════════════════════════════════════════${NC}"
   health_check || true
@@ -264,6 +273,12 @@ run_all_in_one() {
 run_api_standby() {
   echo ""
   echo -e "${YELLOW}备用节点: JWT_SECRET 必须与主站完全相同${NC}"
+  print_standby_prerequisites
+  if ! prompt_yn "已在主库 VPS 执行 [9]→[2] 放行本机 IP $(public_ip) ?" "Y"; then
+    warn "请先在主库完成白名单后再继续"
+    standby_main_menu
+    return 0
+  fi
   prompt_domain_cert
   if [[ "${TLS_MODE:-}" != "deferred" ]]; then
     prompt_tls_settings
@@ -271,11 +286,19 @@ run_api_standby() {
   prompt INSTALL_DIR "安装根目录" "${INSTALL_DIR}"
   COMPOSE_DIR="${INSTALL_DIR}/compose"
   APP_DIR="${INSTALL_DIR}/app"
-  prompt MYSQL_HOST "主库地址 (内网 IP 或域名)" ""
+  local master_hint
+  master_hint="主库公网 IP（install-info 中 MASTER_PUBLIC_IP）"
+  prompt MYSQL_HOST "主库地址 (${master_hint})" ""
   prompt MYSQL_PORT "主库端口" "3306"
   MYSQL_DATABASE="${MYSQL_DATABASE}"
   MYSQL_USER="${MYSQL_USER}"
   prompt MYSQL_PASSWORD "主库用户密码 (与主站 clashwin 用户一致)" ""
+
+  log "安装前测试主库连接..."
+  if ! test_remote_mysql_connection "${MYSQL_HOST}" "${MYSQL_PORT}" "${MYSQL_USER}" "${MYSQL_PASSWORD}" "${MYSQL_DATABASE}"; then
+    print_standby_troubleshooting
+    die "请先修复主库连接后再安装备用节点"
+  fi
   prompt JWT_SECRET "JWT_SECRET (从主站 install-info 复制)" ""
   prompt ADMIN_INIT_SECRET "ADMIN_INIT_SECRET (与主站一致)" ""
   prompt ADMIN_IP_WHITELIST "管理后台 IP 白名单 (可选)" "${ADMIN_IP_WHITELIST:-}"
@@ -298,11 +321,10 @@ run_api_standby() {
   clone_auth_repo
   write_app_env
 
-  log "测试连接主库 ${MYSQL_HOST}:${MYSQL_PORT} ..."
-  if ! docker run --rm mysql:8.0 mysql -h "${MYSQL_HOST}" -P "${MYSQL_PORT}" -u "${MYSQL_USER}" -p"${MYSQL_PASSWORD}" -e "SELECT 1" &>/dev/null; then
-    die "无法连接主库，请检查 MYSQL_HOST、密码、主库防火墙/安全组"
+  if ! test_remote_mysql_connection; then
+    print_standby_troubleshooting
+    die "无法连接主库"
   fi
-  log "主库连接成功"
 
   build_app
   start_host_app_service
@@ -331,8 +353,13 @@ run_db_only() {
   echo "MySQL 端口绑定 (示例):"
   echo "  127.0.0.1:3306:3306 — 仅本机"
   echo "  0.0.0.0:3306:3306 — 允许远程 (需配合安全组+白名单)"
-  prompt MYSQL_BIND "端口映射" "127.0.0.1:3306:3306"
   read -r -p "允许访问 3306 的备用 VPS IP (可选): " standby_ip
+  if [[ -n "${standby_ip:-}" ]]; then
+    MYSQL_BIND="0.0.0.0:3306:3306"
+    log "已选远程主库模式: 绑定 ${MYSQL_BIND}，仅放行 ${standby_ip}"
+  else
+    prompt MYSQL_BIND "端口映射" "127.0.0.1:3306:3306"
+  fi
   confirm_install
 
   mkdir_p "${INSTALL_DIR}" "${COMPOSE_DIR}"
@@ -355,12 +382,19 @@ EOF
   docker compose up -d
   wait_mysql_healthy
 
-  [[ -n "${standby_ip:-}" ]] && allow_mysql_from_ip "${standby_ip}"
+  MASTER_PUBLIC_IP="$(public_ip)"
+  if [[ -n "${standby_ip:-}" ]]; then
+    grant_mysql_user_from_host "${standby_ip}"
+    allow_mysql_from_ip "${standby_ip}"
+    ALLOWED_STANDBY_IPS="${standby_ip}"
+    print_cloud_security_group_hint "${standby_ip}"
+  fi
 
   DOMAIN="${DOMAIN:-db-local}"
   save_install_info
-  log "数据库主库已启动。API 节点 MYSQL_HOST 填本机内网 IP。"
-  echo "  root 密码、业务密码见: ${INSTALL_INFO}"
+  log "数据库主库已启动。"
+  echo "  备用 API 节点 MYSQL_HOST=${MASTER_PUBLIC_IP}（公网 IP）"
+  echo "  密钥见: ${INSTALL_INFO}"
 }
 
 parse_args() {
@@ -370,6 +404,15 @@ parse_args() {
       --renew-cert) need_root; renew_cert; exit 0 ;;
       --show-info) show_install_info; exit 0 ;;
       --show-admin-url) need_root; show_admin_panel_entry; exit 0 ;;
+      --show-topology) need_root; show_topology; exit 0 ;;
+      --test-mysql) need_root; load_install_info; test_remote_mysql_connection || exit 1; exit 0 ;;
+      --export-endpoints) need_root; export_client_endpoints; exit 0 ;;
+      --prepare-standby-ip=*)
+        need_root
+        load_install_info
+        prepare_master_allow_standby_ip "${1#*=}"
+        exit 0
+        ;;
       --uninstall)
         need_root
         load_install_info
@@ -417,6 +460,10 @@ parse_args() {
         echo "  --renew-cert      续签证书"
         echo "  --show-info       查看安装信息"
         echo "  --show-admin-url  查询管理后台入口地址"
+        echo "  --show-topology   查看安装拓扑"
+        echo "  --test-mysql      测试主库 MySQL 连接"
+        echo "  --export-endpoints  导出客户端 endpoints.json"
+        echo "  --prepare-standby-ip=IP  [主库] 允许该 IP 访问 MySQL"
         echo "  --uninstall       卸载 (可加 --reinstall -y 准备重装; --purge-data --purge-all)"
         echo "  --role=all-in-one|api-standby|db-only"
         echo "  --domain= --email= --dir=  非交互安装 (需配合 -y)"
