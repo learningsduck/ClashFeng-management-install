@@ -48,14 +48,18 @@ sudo ./install.sh
 
 4. 安装前会自动测试主库连接；失败时按屏幕检查清单排查
 
-## 步骤三：客户端
+## 步骤三：客户端（自动切换，无需每台手改）
 
-```bash
-sudo ./install.sh
-# [9] → [4] 导出 endpoints.json
-```
+1. 在新 VPS 执行 `[9] → [4]` 导出 endpoints，会写入：
+   - `/opt/clashfeng/endpoints.json`
+   - `/opt/clashfeng/app/public/endpoints.json`
+2. 公网拉取地址（ClashWin 自动访问）：
+   ```text
+   https://新域名/public/endpoints.json
+   ```
+3. **ClashWin** 启动时拉取上述 JSON，请求失败时自动试 `backups` 中的其他 API。
 
-将 `primary` 改为 `https://新域名`，旧域名可放入 `backups`（若仍可用）。
+`primary` 填新域名；`backups` 可填旧域名（仅当海外仍能访问时作备用）。
 
 ## 常用命令
 

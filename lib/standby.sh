@@ -192,10 +192,27 @@ export_client_endpoints() {
 }
 EOF
   chmod 644 "${out}"
+
+  APP_DIR="${APP_DIR:-/opt/clashfeng/app}"
+  if [[ -d "${APP_DIR}" ]]; then
+    mkdir_p "${APP_DIR}/public"
+    cp "${out}" "${APP_DIR}/public/endpoints.json"
+    log "已同步到 ${APP_DIR}/public/endpoints.json"
+    if systemctl is-active clashfeng-auth &>/dev/null 2>&1; then
+      log "客户端拉取地址: ${scheme}://${DOMAIN}/public/endpoints.json"
+      warn "若 API 进程不自动重读文件，可执行: systemctl restart clashfeng-auth"
+    fi
+  fi
+
   log "已写入 ${out}"
   cat "${out}"
   echo ""
-  echo "请将此文件内容合并到 ClashWin 客户端的 endpoints 配置（参考 endpoints.json.example）"
+  echo -e "${GREEN}ClashWin 客户端（方案 A）会自动：${NC}"
+  echo "  1. 启动时探测主备线路（/auth/captcha）"
+  echo "  2. 从 ${scheme}://${DOMAIN}/public/endpoints.json 拉取最新主备列表"
+  echo "  3. 当前线路失败时自动切换 backups，无需用户手改配置"
+  echo ""
+  echo "  构建客户端时可设置 VITE_AUTH_API_PRIMARY / VITE_AUTH_API_BACKUPS 作为内置默认值"
 }
 
 update_compose_mysql_bind() {
