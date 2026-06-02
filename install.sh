@@ -42,9 +42,10 @@ main_menu() {
   echo "  [5] 管理员账户管理"
   echo "  [6] 维护工具"
   echo "  [7] 一键卸载"
+  echo "  [8] 查询管理后台入口"
   echo "  [0] 退出"
   echo ""
-  read -r -p "请输入选项 [0-7]: " choice
+  read -r -p "请输入选项 [0-8]: " choice
   case "${choice}" in
     1) INSTALL_ROLE=all-in-one; run_all_in_one ;;
     2) INSTALL_ROLE=api-standby; run_api_standby ;;
@@ -53,6 +54,7 @@ main_menu() {
     5) admin_management_menu; main_menu ;;
     6) maintenance_menu ;;
     7) uninstall_menu; main_menu ;;
+    8) show_admin_panel_entry; main_menu ;;
     0) exit 0 ;;
     *) err "无效选项"; main_menu ;;
   esac
@@ -66,6 +68,7 @@ maintenance_menu() {
   echo "  [c] 查看 install-info (密钥已脱敏)"
   echo "  [d] 管理员账户管理"
   echo "  [e] 一键卸载"
+  echo "  [f] 查询管理后台入口"
   echo "  [0] 返回"
   read -r -p "请选择: " m
   case "${m}" in
@@ -74,6 +77,7 @@ maintenance_menu() {
     c) show_install_info; main_menu ;;
     d) admin_management_menu; main_menu ;;
     e) uninstall_menu; main_menu ;;
+    f) show_admin_panel_entry; main_menu ;;
     0) main_menu ;;
     *) maintenance_menu ;;
   esac
@@ -365,6 +369,7 @@ parse_args() {
       --health) health_check; exit $? ;;
       --renew-cert) need_root; renew_cert; exit 0 ;;
       --show-info) show_install_info; exit 0 ;;
+      --show-admin-url) need_root; show_admin_panel_entry; exit 0 ;;
       --uninstall)
         need_root
         load_install_info
@@ -411,6 +416,7 @@ parse_args() {
         echo "  --health          健康检查"
         echo "  --renew-cert      续签证书"
         echo "  --show-info       查看安装信息"
+        echo "  --show-admin-url  查询管理后台入口地址"
         echo "  --uninstall       卸载 (可加 --reinstall -y 准备重装; --purge-data --purge-all)"
         echo "  --role=all-in-one|api-standby|db-only"
         echo "  --domain= --email= --dir=  非交互安装 (需配合 -y)"

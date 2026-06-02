@@ -27,26 +27,70 @@ run_admin_cli() {
   )
 }
 
+admin_panel_uses_https() {
+  if [[ "${TLS_MODE:-}" == "http" || "${SKIP_CERT:-0}" == "1" ]]; then
+    return 1
+  fi
+  ss -tlnp 2>/dev/null | grep -qE ':443[^0-9].*nginx|:443\s'
+}
+
+admin_panel_scheme() {
+  if admin_panel_uses_https; then
+    echo "https"
+  else
+    echo "http"
+  fi
+}
+
 show_admin_panel_url() {
   load_install_info 2>/dev/null || true
+  INSTALL_INFO="${INSTALL_INFO:-/opt/clashfeng/install-info.env}"
+
   if [[ -z "${ADMIN_PANEL_PATH:-}" ]]; then
-    warn "未配置 ADMIN_PANEL_PATH"
-    return
+    if [[ -f "${INSTALL_INFO}" ]]; then
+      warn "install-info 中未找到 ADMIN_PANEL_PATH，请确认是否已完成主站安装"
+    else
+      warn "未找到 ${INSTALL_INFO}，请先完成主站安装"
+    fi
+    return 1
   fi
-  local scheme="https"
-  if [[ "${TLS_MODE:-}" == "http" || "${SKIP_CERT:-0}" == "1" ]]; then
-    scheme="http"
-  fi
+
+  local scheme
+  scheme="$(admin_panel_scheme)"
+
+  echo -e "  ${CYAN}管理后台入口（请妥善保存，勿公开）:${NC}"
   if [[ -n "${DOMAIN:-}" && "${DOMAIN}" != "db-local" && "${DOMAIN}" != "_" ]]; then
-    echo -e "  ${CYAN}管理后台入口（请妥善保存，勿公开）:${NC}"
     echo "    ${scheme}://${DOMAIN}${ADMIN_PANEL_PATH}"
-  elif [[ "${TLS_MODE:-}" == "deferred" ]]; then
-    echo -e "  ${CYAN}管理后台（本地，配置域名后请用 Nginx 地址访问）:${NC}"
+  elif [[ "${TLS_MODE:-}" == "deferred" || -z "${DOMAIN:-}" ]]; then
     echo "    http://127.0.0.1:${APP_PORT:-3001}${ADMIN_PANEL_PATH}"
-    echo "  配置域名与 HTTPS: 主菜单 [4]"
+    echo "    （配置域名与 HTTPS 后请用主菜单 [8] 或 [4] 查看公网地址）"
   else
-    echo "  管理后台路径: ${ADMIN_PANEL_PATH}"
+    echo "    ${scheme}://${DOMAIN}${ADMIN_PANEL_PATH}"
   fi
+  echo "    隐藏路径: ${ADMIN_PANEL_PATH}"
+  return 0
+}
+
+show_admin_panel_entry() {
+  need_root
+  load_install_info 2>/dev/null || true
+  INSTALL_INFO="${INSTALL_INFO:-/opt/clashfeng/install-info.env}"
+
+  echo ""
+  echo -e "${CYAN}════════════ 管理后台入口查询 ════════════${NC}"
+  if [[ ! -f "${INSTALL_INFO}" ]]; then
+    warn "未找到 ${INSTALL_INFO}"
+    echo "  请先完成主站安装（主菜单 [1]）"
+    return 1
+  fi
+
+  [[ -n "${DOMAIN:-}" && "${DOMAIN}" != "_" ]] && echo "  域名:     ${DOMAIN}"
+  echo "  配置:     ${INSTALL_INFO}"
+  echo ""
+  show_admin_panel_url || true
+  echo ""
+  echo "  公网首页 ${DOMAIN:-}/ 仅为中性门户，不含管理功能"
+  return 0
 }
 
 admin_management_menu() {

@@ -33,10 +33,11 @@ sudo ./install.sh -y --role=all-in-one --defer-tls --dir=/opt/clashfeng
 ## 维护命令
 
 ```bash
-sudo ./install.sh          # 交互菜单 → [4] HTTPS 证书 / [5] 维护 / [6] 卸载
+sudo ./install.sh          # 交互菜单 → [4] HTTPS / [5] 管理员 / [8] 后台入口 / [7] 卸载
 sudo ./install.sh --health
 sudo ./install.sh --renew-cert
 sudo ./install.sh --show-info
+sudo ./install.sh --show-admin-url   # 随时查看管理后台 URL
 ```
 
 ## 一键卸载
