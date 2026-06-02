@@ -53,7 +53,10 @@ sudo ./install.sh --role=all-in-one --domain=example.com \
 
 1. 浏览器打开 `https://域名/`
 2. 展开「初始化管理员」，填写 `ADMIN_INIT_SECRET`（见 `install-info.env`）
-3. 修改 ClashWin 客户端 `AUTH_API_BASE_URL` 为 `https://域名`
+3. 配置 `/opt/clashfeng/app/public/endpoints.json`（`primary` + `backups` 均为 **https 域名**）
+4. ClashWin 构建时设置 `VITE_AUTH_API_PRIMARY=https://域名`（与 endpoints 一致）
+
+**安全**：Node 默认 `BIND_HOST=127.0.0.1`，云安全组 **不要** 对公网开放 **3001**，仅 **80/443**。
 
 ## 4. 目录结构
 

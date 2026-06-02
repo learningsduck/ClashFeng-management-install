@@ -49,6 +49,7 @@ write_app_env() {
   cat > "${COMPOSE_DIR}/.env" <<EOF
 APP_DIR=${APP_DIR}
 PORT=${APP_PORT}
+BIND_HOST=127.0.0.1
 NODE_ENV=${NODE_ENV}
 REQUIRE_HTTPS=${REQUIRE_HTTPS}
 ${mysql_bind_line}

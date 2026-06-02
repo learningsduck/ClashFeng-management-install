@@ -119,6 +119,12 @@ open_firewall_http() {
   else
     warn "未启用 firewalld，请在云厂商安全组放行 80/443"
   fi
+  warn_app_port_not_public
+}
+
+warn_app_port_not_public() {
+  local port="${APP_PORT:-3001}"
+  warn "请勿在云安全组对公网开放 TCP ${port}；API 仅通过 Nginx 443 访问（Node 绑定 127.0.0.1）"
 }
 
 allow_mysql_from_ip() {

@@ -266,6 +266,7 @@ run_all_in_one() {
       warn "HTTPS 配置未完全成功，可稍后在主菜单 [4] 重试"
     fi
   fi
+  warn_app_port_not_public
 
   show_done
 }
@@ -339,6 +340,7 @@ run_api_standby() {
       warn "HTTPS 配置未完全成功，可稍后在主菜单 [4] 重试"
     fi
   fi
+  warn_app_port_not_public
 
   show_done
 }
